@@ -278,9 +278,9 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
 
     try {
       console.log('[RAPID] Enviando código al backend para interpolación...');
-      console.log('[RAPID] URL:', 'https://simuladorbackend.azurewebsites.net/api/rapid/interpolate');
+      console.log('[RAPID] URL:', 'http://127.0.0.1:5000/api/rapid/interpolate');
 
-      const response = await axios.post('https://simuladorbackend.azurewebsites.net/api/rapid/interpolate', {
+      const response = await axios.post('http://127.0.0.1:5000/api/rapid/interpolate', {
         code: code
       }, {
         timeout: 120000
@@ -319,7 +319,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         addOutput(`  → Status: ${error.response.status}`);
       } else if (error.request) {
         addOutput(`  → No se recibió respuesta del servidor`);
-        addOutput(`  → ¿Está el backend corriendo en https://simuladorbackend.azurewebsites.net?`);
+        addOutput(`  → ¿Está el backend corriendo en http://127.0.0.1:5000?`);
       } else {
         addOutput(`  → ${error.message}`);
       }
@@ -476,7 +476,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     try {
       addOutput(`> Descargando proyecto RobotStudio para ${robotType ?? 'robot'}...`);
       const response = await axios.post(
-        `https://simuladorbackend.azurewebsites.net/api/rapid/download/${robotId}`,
+        `http://127.0.0.1:5000/api/rapid/download/${robotId}`,
         { code },
         { responseType: 'blob' }
       );
