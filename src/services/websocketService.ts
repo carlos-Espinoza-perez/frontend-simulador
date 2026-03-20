@@ -20,7 +20,7 @@ class WebSocketService {
     this.hasConnected = true;
 
     this.socket = io(WS_URL, {
-      transports: ['websocket'], // Forzar WebSocket puro, nada de HTTP polling lento
+      transports: ['polling', 'websocket'], // Intentar polling primero
       reconnection: true,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
@@ -127,9 +127,9 @@ class WebSocketService {
   }
 
   executeRapidStreaming(
-    code: string, 
-    onPoint: (point: any) => void, 
-    onComplete: () => void, 
+    code: string,
+    onPoint: (point: any) => void,
+    onComplete: () => void,
     onError: (error: string) => void,
     onConsole?: (message: string, type: string) => void
   ) {
