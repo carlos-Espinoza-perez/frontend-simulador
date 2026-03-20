@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { EstadoRobot } from './robotService';
 
-const WS_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+const WS_URL = import.meta.env.VITE_API_URL || 'https://simuladorbackend.azurewebsites.net';
 
 class WebSocketService {
   private socket: Socket | null = null;
