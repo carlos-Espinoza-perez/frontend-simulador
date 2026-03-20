@@ -1,4 +1,4 @@
-import { Terminal, X, GripVertical, Maximize2, Minimize2, Play, Save, FileCode, Loader2, Square } from 'lucide-react';
+import { Terminal, X, GripVertical, Maximize2, Minimize2, Play, Save, FileCode, Loader2, Square, Upload } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useDraggable } from '../hooks/useDraggable';
 import Editor from '@monaco-editor/react';
@@ -50,6 +50,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
   const [currentStep, setCurrentStep] = useState(0);
   const [useWebSocket, setUseWebSocket] = useState(true); // Preferir WebSocket
   const editorRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { position, isDragging, dragRef, handleMouseDown } = useDraggable({
     initialPosition: { x: window.innerWidth / 2 - 400, y: window.innerHeight - 280 },
@@ -74,6 +75,13 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       lineNumbers: 'on',
       renderLineHighlight: 'all',
       automaticLayout: true,
+      // Optimizaciones para archivos grandes
+      largeFileOptimizations: true,
+      maxTokenizationLineLength: 20000,
+      // Deshabilitar validación en tiempo real para archivos grandes
+      quickSuggestions: false,
+      parameterHints: { enabled: false },
+      suggestOnTriggerCharacters: false,
     });
   };
 
@@ -388,6 +396,26 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     // Aquí se puede agregar la lógica para guardar el código
   };
 
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setCode(content);
+      addOutput(`> Archivo cargado: ${file.name} (${content.split('\n').length} líneas)`);
+    };
+    reader.onerror = () => {
+      addOutput(`> ✗ Error al leer el archivo`);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
   // Estilos según el estado expandido
   const containerStyle = isExpanded
     ? {
@@ -431,6 +459,21 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
 
         <div className="flex items-center gap-2">
           {/* Action Buttons */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,.mod,.prg"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <button
+            onClick={handleUploadClick}
+            className="text-gray-400 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded flex items-center gap-1.5 text-xs"
+            title="Cargar archivo RAPID"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Cargar</span>
+          </button>
           <button
             onClick={handleSave}
             className="text-gray-400 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded flex items-center gap-1.5 text-xs"
@@ -513,8 +556,14 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
               wordWrap: 'on',
               tabSize: 2,
               insertSpaces: true,
-              formatOnPaste: true,
-              formatOnType: true,
+              formatOnPaste: false, // Desactivar para archivos grandes
+              formatOnType: false,  // Desactivar para archivos grandes
+              // Optimizaciones para archivos grandes
+              largeFileOptimizations: true,
+              maxTokenizationLineLength: 20000,
+              quickSuggestions: false,
+              parameterHints: { enabled: false },
+              suggestOnTriggerCharacters: false,
             }}
           />
         </div>
