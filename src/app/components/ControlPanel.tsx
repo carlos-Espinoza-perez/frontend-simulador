@@ -15,11 +15,12 @@ interface ControlPanelProps {
   jointAngles: number[];
   onJointChange: (index: number, value: number) => void;
   onReset: () => void;
-  robotType: 'ABB IRB 140' | 'UR5' | 'SCARA';
-  onRobotChange: (robot: 'ABB IRB 140' | 'UR5' | 'SCARA') => void;
+  robotType: 'ABB IRB 140' | 'IRB 910SC SCARA';
+  onRobotChange: (robot: 'ABB IRB 140' | 'IRB 910SC SCARA') => void;
   onClose: () => void;
   currentPosition?: { x: number; y: number; z: number } | null;
   singularityAnalysis?: any;
+  robotInfo?: any;
 }
 
 export function ControlPanel({
@@ -31,6 +32,7 @@ export function ControlPanel({
   onClose,
   currentPosition,
   singularityAnalysis,
+  robotInfo,
 }: ControlPanelProps) {
   const { position, isDragging, dragRef, handleMouseDown } = useDraggable({
     initialPosition: { x: window.innerWidth - 352, y: 80 },
@@ -38,22 +40,34 @@ export function ControlPanel({
 
   const [showSingularity, setShowSingularity] = useState(false);
 
-  const joints = [
-    { name: 'J1', min: -170, max: 170, color: 'from-red-500 to-red-600' },
-    { name: 'J2', min: -65, max: 85, color: 'from-orange-500 to-orange-600' },
-    { name: 'J3', min: -52, max: 50, color: 'from-yellow-500 to-yellow-600' },
-    { name: 'J4', min: -300, max: 300, color: 'from-green-500 to-green-600' },
-    { name: 'J5', min: -120, max: 120, color: 'from-blue-500 to-blue-600' },
-    { name: 'J6', min: -400, max: 400, color: 'from-purple-500 to-purple-600' },
+  const defaultColors = [
+    'from-red-500 to-red-600',
+    'from-orange-500 to-orange-600',
+    'from-yellow-500 to-yellow-600',
+    'from-green-500 to-green-600',
+    'from-blue-500 to-blue-600',
+    'from-purple-500 to-purple-600',
+    'from-pink-500 to-pink-600',
   ];
+
+  const limits = robotInfo?.limites_articulares || [];
+  const unit = robotInfo?.tipo === 'SCARA' ? ['°', '°', 'mm', '°'] : ['°', '°', '°', '°', '°', '°', '°']; // Aprox unit check si lo queremos
+
+  const jointsConfig = Array.from({ length: jointAngles.length }).map((_, i) => ({
+    name: `J${i + 1}`,
+    min: limits[i] ? limits[i][0] : -360,
+    max: limits[i] ? limits[i][1] : 360,
+    color: defaultColors[i % defaultColors.length],
+    // Helper visual unit
+    unit: robotInfo?.tipos_articulaciones?.[i] === 'P' ? 'mm' : '°'
+  }));
 
   return (
     <div
       ref={dragRef}
       onMouseDown={handleMouseDown}
-      className={`fixed w-80 bg-gradient-to-br from-white/5 to-white/[0.02] backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl overflow-hidden ${
-        isDragging ? 'cursor-grabbing' : ''
-      }`}
+      className={`fixed w-80 bg-gradient-to-br from-white/5 to-white/[0.02] backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl overflow-hidden ${isDragging ? 'cursor-grabbing' : ''
+        }`}
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -89,15 +103,8 @@ export function ControlPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-[#0a0e14] border-white/10">
-              <SelectItem value="ABB IRB 140" className="text-white hover:bg-white/10">
-                ABB IRB 140
-              </SelectItem>
-              <SelectItem value="UR5" className="text-white hover:bg-white/10">
-                UR5
-              </SelectItem>
-              <SelectItem value="SCARA" className="text-white hover:bg-white/10">
-                SCARA
-              </SelectItem>
+              <SelectItem value="ABB IRB 140" className="text-white hover:bg-white/10">IRB 140 (6 Ejes)</SelectItem>
+              <SelectItem value="IRB 910SC SCARA" className="text-white hover:bg-white/10">IRB 910SC (SCARA)</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -107,17 +114,17 @@ export function ControlPanel({
           <div className="text-xs text-gray-400 uppercase tracking-wide">
             Control de Articulaciones
           </div>
-          {joints.map((joint, index) => (
+          {jointsConfig.map((joint, index) => (
             <div key={joint.name} className="space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-xs text-gray-400 font-mono">{joint.name}</span>
                 <span className="text-sm text-white font-mono bg-black/30 px-2 py-1 rounded border border-white/5">
-                  {jointAngles[index].toFixed(1)}°
+                  {jointAngles[index] !== undefined ? jointAngles[index].toFixed(1) : 0}{joint.unit}
                 </span>
               </div>
               <div className="relative">
                 <Slider
-                  value={[jointAngles[index]]}
+                  value={[jointAngles[index] || 0]}
                   onValueChange={(value) => onJointChange(index, value[0])}
                   min={joint.min}
                   max={joint.max}
@@ -127,8 +134,8 @@ export function ControlPanel({
                 <div className={`absolute -bottom-1 left-0 right-0 h-0.5 rounded-full bg-gradient-to-r ${joint.color} opacity-20`} />
               </div>
               <div className="flex justify-between text-xs text-gray-600">
-                <span>{joint.min}°</span>
-                <span>{joint.max}°</span>
+                <span>{joint.min}{joint.unit}</span>
+                <span>{joint.max}{joint.unit}</span>
               </div>
             </div>
           ))}
@@ -142,28 +149,6 @@ export function ControlPanel({
           <Home className="w-4 h-4" />
           Reset Home
         </button>
-
-        {/* Botón de análisis de singularidades */}
-        <div className="pt-2 border-t border-white/10">
-          <button
-            onClick={() => setShowSingularity(!showSingularity)}
-            className={`w-full py-2 px-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all duration-200 ${
-              showSingularity
-                ? 'bg-yellow-600 hover:bg-yellow-500 text-white'
-                : 'bg-black/30 hover:bg-black/40 text-gray-300 border border-white/10'
-            }`}
-          >
-            <Activity className="w-4 h-4" />
-            {showSingularity ? 'Ocultar' : 'Mostrar'} Análisis de Singularidad
-          </button>
-        </div>
-
-        {/* Panel de Singularidad */}
-        {showSingularity && (
-          <div className="pt-2 border-t border-white/10">
-            <SingularityAnalysis analisis={singularityAnalysis} />
-          </div>
-        )}
       </div>
     </div>
   );

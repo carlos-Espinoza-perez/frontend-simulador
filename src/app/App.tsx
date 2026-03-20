@@ -28,7 +28,7 @@ export default function App() {
   } = useRobotState();
 
   // Estados locales para UI
-  const [robotType, setRobotType] = useState<'ABB IRB 140' | 'UR5' | 'SCARA'>('ABB IRB 140');
+  const [robotType, setRobotType] = useState<'ABB IRB 140' | 'IRB 910SC SCARA'>('ABB IRB 140');
   const [jointAngles, setJointAngles] = useState([0, 0, 0, 0, 0, 0]);
   const [singularityDetected, setSingularityDetected] = useState(false);
   const [editorExpanded, setEditorExpanded] = useState(false);
@@ -60,13 +60,28 @@ export default function App() {
     }
   }, [estado]);
 
-  // Actualizar tipo de robot cuando cambia
+  // Sincronizar robot con backend (auto-resync tras restart del servidor)
   useEffect(() => {
     if (robotInfo?.nombre) {
-      setRobotType(robotInfo.nombre as any);
+      const backendName = robotInfo.nombre as typeof robotType;
+      if (backendName !== robotType && robotType !== 'ABB IRB 140') {
+        // Backend se reinició y está en default (IRB 140), pero el usuario tenía otro robot
+        // Re-enviar la selección del usuario al backend
+        const robotIdMap: Record<string, string> = {
+          'ABB IRB 140': 'ABB_IRB_140',
+          'IRB 910SC SCARA': 'ABB_IRB_910SC',
+        };
+        const correctId = robotIdMap[robotType];
+        if (correctId) {
+          console.log(`[SYNC] Backend tiene "${backendName}" pero UI tiene "${robotType}". Re-sincronizando...`);
+          selectRobot(correctId);
+        }
+      } else {
+        setRobotType(backendName);
+      }
     }
   }, [robotInfo]);
-  
+
   // Panel visibility states
   const [showOrientation, setShowOrientation] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
@@ -80,7 +95,7 @@ export default function App() {
     const newAngles = [...jointAngles];
     newAngles[index] = value;
     setJointAngles(newAngles);
-    
+
     // Enviar al backend
     try {
       await moveRobot(newAngles);
@@ -99,14 +114,13 @@ export default function App() {
     }
   };
 
-  const handleRobotChange = async (newRobotType: 'ABB IRB 140' | 'UR5' | 'SCARA') => {
+  const handleRobotChange = async (newRobotType: 'ABB IRB 140' | 'IRB 910SC SCARA') => {
     // Mapear nombre a ID del backend
     const robotIdMap: Record<string, string> = {
       'ABB IRB 140': 'ABB_IRB_140',
-      'UR5': 'UR5',
-      'SCARA': 'ABB_IRB_910SC',
+      'IRB 910SC SCARA': 'ABB_IRB_910SC',
     };
-    
+
     const robotId = robotIdMap[newRobotType];
     if (robotId) {
       try {
@@ -122,31 +136,31 @@ export default function App() {
     console.log('=== INICIANDO EJECUCIÓN DE TRAYECTORIA ===');
     console.log('Total de puntos:', points.length);
     console.log('Interpolación:', interpolationSteps, 'pasos con', stepDelay, 'ms de delay');
-    
+
     for (let i = 0; i < points.length; i++) {
       const point = points[i];
       console.log(`Ejecutando punto ${i + 1}/${points.length}:`, point.name);
       console.log('Joints:', point.joints);
-      
+
       try {
         // Si no es el primer punto, interpolar desde el punto anterior
         if (i > 0) {
           const prevPoint = points[i - 1];
-          
+
           console.log(`Interpolando ${interpolationSteps} pasos desde punto ${i} a punto ${i + 1}`);
-          
+
           // Interpolar entre los joints del punto anterior y el actual
           for (let step = 1; step <= interpolationSteps; step++) {
             const t = step / interpolationSteps; // Factor de interpolación (0 a 1)
-            
+
             // Interpolación lineal para cada joint
             const interpolatedJoints = prevPoint.joints.map((prevJoint: number, idx: number) => {
               const currentJoint = point.joints[idx];
               return prevJoint + (currentJoint - prevJoint) * t;
             });
-            
+
             await moveRobot(interpolatedJoints);
-            
+
             // Delay configurable entre pasos de interpolación
             await new Promise(resolve => setTimeout(resolve, stepDelay));
           }
@@ -154,9 +168,9 @@ export default function App() {
           // Primer punto: mover directamente
           await moveRobot(point.joints);
         }
-        
+
         console.log(`Punto ${i + 1} ejecutado exitosamente`);
-        
+
         // Pausa más larga al llegar a cada punto guardado
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (err) {
@@ -164,7 +178,7 @@ export default function App() {
         throw err;
       }
     }
-    
+
     console.log('=== TRAYECTORIA COMPLETADA ===');
   };
 
@@ -172,32 +186,32 @@ export default function App() {
     // Generar código RAPID desde los puntos guardados
     let rapidCode = `MODULE Module1\n`;
     rapidCode += `  CONST jointtarget ZERO:=[[0,0,0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]];\n`;
-    
+
     // Generar robtargets para cada punto
     points.forEach((point, index) => {
       const pointName = `P${(index + 1) * 10}`;
       const pos = point.position;
       rapidCode += `  CONST robtarget ${pointName}:=[[${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}],[4.14816E-8,6.1133E-9,-1,-2.53589E-16],[0,0,-1,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]];\n`;
     });
-    
+
     rapidCode += `\n  PROC main()\n`;
     rapidCode += `    MoveAbsJ ZERO\\NoEOffs, v1000, fine, tool0;\n`;
-    
+
     // Generar movimientos
     points.forEach((point, index) => {
       const pointName = `P${(index + 1) * 10}`;
       const moveType = index === 0 ? 'MoveJ' : 'MoveL';
       rapidCode += `    ${moveType} ${pointName}, v500, fine, tool0;\n`;
     });
-    
+
     rapidCode += `    MoveAbsJ ZERO\\NoEOffs, v1000, fine, tool0;\n`;
     rapidCode += `  ENDPROC\n`;
     rapidCode += `ENDMODULE`;
-    
+
     // Actualizar el código y abrir el editor
     setRapidCode(rapidCode);
     setShowEditor(true);
-    
+
     console.log('Código RAPID generado:', rapidCode);
   };
 
@@ -205,12 +219,11 @@ export default function App() {
     <div className="relative h-screen w-screen overflow-hidden bg-[#0a0e14] font-mono">
       {/* Background Grid Pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]" />
-      
+
       {/* Connection Status */}
       <div className="absolute top-2 right-2 z-50">
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs ${
-          connected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-        }`}>
+        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs ${connected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+          }`}>
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-yellow-400'}`} />
           {connected ? 'WebSocket Conectado' : 'REST API (Sin WebSocket)'}
         </div>
@@ -233,12 +246,12 @@ export default function App() {
           </div>
         </div>
       )}
-      
+
       {/* Header */}
       <Header robotName={robotType} />
 
       {/* Main Canvas Area */}
-      <div 
+      <div
         className="transition-all duration-300"
         style={{
           height: editorExpanded ? '60vh' : '100vh',
@@ -251,21 +264,22 @@ export default function App() {
       {!editorExpanded && (
         <>
           {showOrientation && (
-            <OrientationPanel 
+            <OrientationPanel
               singularityDetected={singularityDetected}
               jointAngles={jointAngles}
               onClose={() => setShowOrientation(false)}
             />
           )}
           {showTelemetry && (
-            <TelemetryPanel 
+            <TelemetryPanel
               jointAngles={jointAngles}
               currentPosition={estado?.posicion}
+              robotInfo={robotInfo}
               onClose={() => setShowTelemetry(false)}
             />
           )}
           {showDHParameters && (
-            <DHParametersPanel 
+            <DHParametersPanel
               jointAngles={jointAngles}
               onClose={() => setShowDHParameters(false)}
             />
@@ -284,6 +298,7 @@ export default function App() {
           onClose={() => setShowControl(false)}
           currentPosition={estado?.posicion}
           singularityAnalysis={singularityAnalysis}
+          robotInfo={robotInfo}
         />
       )}
 
@@ -300,7 +315,7 @@ export default function App() {
 
       {/* RAPID Editor */}
       {showEditor && (
-        <RapidEditor 
+        <RapidEditor
           onClose={() => setShowEditor(false)}
           onExpand={setEditorExpanded}
           onExecuteMovement={async (joints) => {

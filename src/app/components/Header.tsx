@@ -6,7 +6,7 @@ interface HeaderProps {
 
 export function Header({ robotName }: HeaderProps) {
   return (
-    <header className="relative z-50 flex items-center justify-between px-8 py-4 border-b border-white/10 bg-[#0a0e14]/80 backdrop-blur-md">
+    <header className="relative z-40 flex items-center justify-between px-8 py-4 border-b border-white/10 bg-[#0a0e14]/80 backdrop-blur-md">
       {/* Left: Logo and Robot Name */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">

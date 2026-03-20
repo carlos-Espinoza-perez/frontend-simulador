@@ -9,9 +9,10 @@ interface STLModelProps {
   url: string;
   color?: string;
   scale?: number;
+  position?: THREE.Vector3;
 }
 
-function STLModel({ url, color = '#E8E8E8', scale = 1 }: STLModelProps) {
+function STLModel({ url, color = '#E8E8E8', scale = 1, position }: STLModelProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [error, setError] = useState<boolean>(false);
@@ -51,6 +52,7 @@ function STLModel({ url, color = '#E8E8E8', scale = 1 }: STLModelProps) {
       geometry={geometry}
       castShadow
       receiveShadow
+      position={position}
     >
       <meshStandardMaterial
         color={color}
@@ -89,7 +91,7 @@ function TrajectoryLine({
   return (
     <Line
       points={points}
-      color="#33ff00ff"
+      color="#33ff00"
       lineWidth={2}
       transparent
       opacity={0.6}
@@ -108,9 +110,14 @@ interface RobotViewerProps {
       nombre: string;
       archivo_stl: string;
       color: string;
+      posicion_local?: [number, number, number];
     }>;
     visualizacion?: {
       escala?: number;
+      posicion_inicial?: number[];
+      rotacion_inicial?: number[];
+      pivots?: number[][];
+      axes?: number[][];
       camara?: {
         posicion?: [number, number, number];
         fov?: number;
@@ -124,10 +131,15 @@ interface RobotViewerProps {
         division?: number;
       };
     };
+    nombre?: string;
+    tipos_articulaciones?: string[];
   } | null;
   showTrajectory?: boolean;
   onTrajectoryToggle?: (show: boolean) => void;
   onClearTrajectory?: () => void;
+  customPivots?: number[][];
+  customPositions?: number[][];
+  customTcpOffset?: [number, number, number];
 }
 
 const DX = 0.247;
@@ -136,12 +148,12 @@ const DY = 0.203;
 // Pivots ajustados para centrar visualmente cada articulación
 const PIVOTS_HOME = [
   new THREE.Vector3(0, 0, 0),
-  new THREE.Vector3(DX + 0.065, DY, 0),         // J1 - ajustado para centrar base
-  new THREE.Vector3(DX + 0.140, DY, 0.352),     // J2 - ajustado para centrar eje
-  new THREE.Vector3(DX + 0.140, DY, 0.712),     // J3 - ajustado para centrar eje
-  new THREE.Vector3(DX + 0.070, DY, 0.712),     // J4 - original
-  new THREE.Vector3(DX + 0.520, DY, 0.712),     // J5 - ajustado +70mm en X
-  new THREE.Vector3(DX + 0.515, DY, 0.712)      // J6 - original
+  new THREE.Vector3(DX + 0.065, DY, 0),         // J1
+  new THREE.Vector3(DX + 0.140, DY, 0.352),     // J2
+  new THREE.Vector3(DX + 0.140, DY, 0.712),     // J3
+  new THREE.Vector3(DX + 0.070, DY, 0.712),     // J4
+  new THREE.Vector3(DX + 0.520, DY, 0.712),     // J5
+  new THREE.Vector3(DX + 0.515, DY, 0.712)      // J6
 ];
 
 const AXES_HOME = [
@@ -154,19 +166,27 @@ const AXES_HOME = [
   new THREE.Vector3(1, 0, 0)
 ];
 
-function Robot({ jointAngles, robotInfo, showTrajectory }: RobotViewerProps) {
-  const groupRefs = useRef<(THREE.Group | null)[]>([null, null, null, null, null, null, null]);
+function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPositions, customTcpOffset }: RobotViewerProps) {
+  const groupRefs = useRef<(THREE.Group | null)[]>([]);
   const trajectoryPoints = useRef<THREE.Vector3[]>([]);
   const lastTcpPosition = useRef<THREE.Vector3 | null>(null);
 
   const scale = robotInfo?.visualizacion?.escala || 0.001;
   const robotFolder = robotInfo?.ruta_stl.split('/').pop();
 
-  const eslabones = robotInfo?.eslabones || robotInfo?.archivos_stl.map((filename, index) => ({
+  const initPos = robotInfo?.visualizacion?.posicion_inicial
+    ? [...robotInfo.visualizacion.posicion_inicial] as [number, number, number]
+    : [-0.2439, 0, 0.200] as [number, number, number];
+
+  const initRotDeg = robotInfo?.visualizacion?.rotacion_inicial || [-90, 0, 0];
+  const initRot = initRotDeg.map(d => (d * Math.PI) / 180) as [number, number, number];
+
+  const eslabones = robotInfo?.eslabones || robotInfo?.archivos_stl?.map((filename, index) => ({
     id: index,
     nombre: `Link ${index}`,
     archivo_stl: filename,
-    color: index === 0 ? '#E8E8E8' : '#E8E8E8'
+    color: index === 0 ? '#E8E8E8' : '#E8E8E8',
+    posicion_local: [0, 0, 0] as [number, number, number]
   })) || [];
 
   // Limpiar trayectoria cuando se solicite
@@ -178,15 +198,26 @@ function Robot({ jointAngles, robotInfo, showTrajectory }: RobotViewerProps) {
   }, [showTrajectory]);
 
   useFrame(() => {
-    if (!robotInfo || !jointAngles || jointAngles.length < 6) return;
+    if (!robotInfo || !jointAngles || jointAngles.length < 1) return;
 
     // Validación de seguridad para que ningún cálculo introduzca 'NaN' a la GPU 
     if (jointAngles.some(ang => ang === null || ang === undefined || isNaN(ang))) return;
 
     const q_rad = jointAngles.map(deg => (deg * Math.PI) / 180);
 
-    const pivots = PIVOTS_HOME.map(p => p.clone());
-    const axes = AXES_HOME.map(a => a.clone());
+    let activePivots = customPivots ? customPivots.map(p => new THREE.Vector3(p[0], p[1], p[2])) : null;
+    if (!activePivots) {
+      activePivots = robotInfo?.visualizacion?.pivots
+        ? robotInfo.visualizacion.pivots.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+        : PIVOTS_HOME;
+    }
+
+    const activeAxes = robotInfo?.visualizacion?.axes
+      ? robotInfo.visualizacion.axes.map(a => new THREE.Vector3(a[0], a[1], a[2]))
+      : AXES_HOME;
+
+    const pivots = activePivots.map(p => p.clone());
+    const axes = activeAxes.map(a => a.clone());
 
     groupRefs.current.forEach((ref) => {
       if (ref) {
@@ -196,38 +227,63 @@ function Robot({ jointAngles, robotInfo, showTrajectory }: RobotViewerProps) {
       }
     });
 
-    for (let j = 1; j <= 6; j++) {
-      let ang = q_rad[j - 1];
-      if (Math.abs(ang) < 1e-5) continue;
+    const numJoints = jointAngles.length;
+    const numLinks = eslabones.length;
 
-      const origin = pivots[j];
-      const axis = axes[j];
+    for (let j = 1; j <= numJoints; j++) {
+      let isPrismatic = (robotInfo as any)?.tipos_articulaciones?.[j - 1] === 'P';
+      let val = isPrismatic ? jointAngles[j - 1] * 0.001 : q_rad[j - 1]; // Convertir a metros si es prismático
+      if (Math.abs(val) < 1e-5) continue;
 
-      for (let link_idx = j; link_idx <= 6; link_idx++) {
+      const origin = pivots[j] || pivots[pivots.length - 1];
+      const axis = axes[j] || axes[axes.length - 1];
+
+      for (let link_idx = j; link_idx < numLinks; link_idx++) {
         const ref = groupRefs.current[link_idx];
         if (!ref) continue;
 
-        const tempPos = ref.position.clone().sub(origin);
-        tempPos.applyAxisAngle(axis, ang);
-        ref.position.copy(origin).add(tempPos);
-
-        ref.rotateOnWorldAxis(axis, ang);
+        if (isPrismatic) {
+          ref.position.add(axis.clone().multiplyScalar(val));
+        } else {
+          const tempPos = ref.position.clone().sub(origin);
+          tempPos.applyAxisAngle(axis, val);
+          ref.position.copy(origin).add(tempPos);
+          ref.rotateOnWorldAxis(axis, val);
+        }
       }
 
-      for (let p_idx = j + 1; p_idx <= 6; p_idx++) {
-        const offset = pivots[p_idx].clone().sub(origin);
-        const newOffset = offset.applyAxisAngle(axis, ang);
-        pivots[p_idx].copy(origin).add(newOffset);
-        axes[p_idx].applyAxisAngle(axis, ang);
+      for (let p_idx = j + 1; p_idx < pivots.length; p_idx++) {
+        if (isPrismatic) {
+          pivots[p_idx].add(axis.clone().multiplyScalar(val));
+        } else {
+          const offset = pivots[p_idx].clone().sub(origin);
+          const newOffset = offset.applyAxisAngle(axis, val);
+          pivots[p_idx].copy(origin).add(newOffset);
+          if (p_idx < axes.length) {
+            axes[p_idx].applyAxisAngle(axis, val);
+          }
+        }
       }
     }
-
-    // Calcular posición del TCP (Tool Center Point)
-    // El TCP está en el último pivot (J6) + offset del end effector
-    const tcpOffset = 0.065; // 65mm del end effector
-    const lastPivot = pivots[6];
-    const lastAxis = axes[6]; // Eje X del end effector
+    // Calcular posición del TCP
+    const lastPivot = pivots[pivots.length - 1] || new THREE.Vector3();
+    const lastAxis = axes[axes.length - 1] || new THREE.Vector3(1, 0, 0);
+    
+    let tcpOffset = 0;
+    if (robotInfo?.nombre === 'ABB IRB 140') {
+      tcpOffset = 0.065;
+    }
+    // Se calcula usando los pivotes que se actualizan correctamente con todos los joints
     const tcpPosition = lastPivot.clone().add(lastAxis.clone().multiplyScalar(tcpOffset));
+    
+    // Si hay un customTcpOffset, lo aplicamos para centrar visualmente.
+    // Necesitamos aplicar este desfase rotado junto con el último pivote, 
+    // pero como el offset es habitualmente visual (constante local al TCP),
+    // lo sumamos según los ejes base o ejes rotados. Para simplificar la calibración, 
+    // lo sumamos relativo a los ejes globales para que el usuario pueda alinearlo.
+    if (customTcpOffset) {
+      tcpPosition.add(new THREE.Vector3(customTcpOffset[0], customTcpOffset[1], customTcpOffset[2]));
+    }
 
     // Agregar punto a la trayectoria de forma segura (sin tocar UI)
     if (showTrajectory) {
@@ -247,19 +303,24 @@ function Robot({ jointAngles, robotInfo, showTrajectory }: RobotViewerProps) {
   });
 
   return (
-    <group rotation={[-Math.PI / 2, 0, 0]} position={[-0.2439, 0, 0.200]}>
-      {eslabones.map((eslabon, index) => (
-        <group
-          key={eslabon.id}
-          ref={(el: THREE.Group | null) => { groupRefs.current[index] = el; }}
-        >
-          <STLModel
-            url={`/models/${robotFolder}/${eslabon.archivo_stl}`}
-            color={eslabon.color}
-            scale={scale}
-          />
-        </group>
-      ))}
+    <group rotation={initRot} position={initPos}>
+      {eslabones.map((eslabon, index) => {
+        const localPosArray = customPositions?.[index] || eslabon.posicion_local || [0, 0, 0];
+        const localPos = new THREE.Vector3(localPosArray[0], localPosArray[1], localPosArray[2]);
+        return (
+          <group
+            key={eslabon.id}
+            ref={(el: THREE.Group | null) => { groupRefs.current[index] = el; }}
+          >
+            <STLModel
+              url={`/models/${robotFolder}/${eslabon.archivo_stl}`}
+              color={eslabon.color}
+              scale={scale}
+              position={localPos}
+            />
+          </group>
+        );
+      })}
 
       {/* Línea de trayectoria gestionada aisladamente por un componente que maneja el componente Line */}
       <TrajectoryLine
@@ -270,24 +331,24 @@ function Robot({ jointAngles, robotInfo, showTrajectory }: RobotViewerProps) {
   );
 }
 
-function WorkspaceCloud({ points }: { points: number[][] }) {
+function WorkspaceCloud({ points, initPos, initRot, isIRB140 }: { points: number[][], initPos: [number, number, number], initRot: [number, number, number], isIRB140: boolean }) {
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
     if (points.length > 0) {
       const vertices = new Float32Array(points.length * 3);
       for (let i = 0; i < points.length; i++) {
-        vertices[i * 3] = (points[i][0] / 1000) + DX + 0.070;     // mm a m y offset a base
-        vertices[i * 3 + 1] = (points[i][1] / 1000) + DY;         // mm a m y offset a base
+        vertices[i * 3] = (points[i][0] / 1000) + (isIRB140 ? DX + 0.070 : 0);
+        vertices[i * 3 + 1] = (points[i][1] / 1000) + (isIRB140 ? DY : 0);
         vertices[i * 3 + 2] = points[i][2] / 1000;
       }
       geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
       geo.computeBoundingSphere();
     }
     return geo;
-  }, [points]);
+  }, [points, isIRB140]);
 
   return (
-    <points rotation={[-Math.PI / 2, 0, 0]} position={[-0.2439, 0, 0.200]} geometry={geometry}>
+    <points rotation={initRot} position={initPos} geometry={geometry}>
       <pointsMaterial
         size={0.008}
         color="#00ffff"
@@ -308,13 +369,31 @@ function Scene({
   onTrajectoryToggle,
   onClearTrajectory,
   showWorkspace,
-  workspacePoints
-}: RobotViewerProps & { showWorkspace: boolean; workspacePoints: number[][] }) {
+  workspacePoints,
+  customPivots,
+  customPositions,
+  customTcpOffset
+}: RobotViewerProps & { showWorkspace: boolean; workspacePoints: number[][]; customPivots: number[][]; customPositions: number[][]; customTcpOffset: [number, number, number] }) {
   const gridSize = robotInfo?.workspace?.grid?.tamaño || 10;
   const gridDivision = robotInfo?.workspace?.grid?.division || 0.1;
   const minDistance = robotInfo?.visualizacion?.camara?.min_distancia || 1;
   const maxDistance = robotInfo?.visualizacion?.camara?.max_distancia || 10;
   const [showPivots, setShowPivots] = useState(false);
+
+  const initPos = robotInfo?.visualizacion?.posicion_inicial
+    ? [...robotInfo.visualizacion.posicion_inicial] as [number, number, number]
+    : [-0.2439, 0, 0.200] as [number, number, number];
+
+  const initRotDeg = robotInfo?.visualizacion?.rotacion_inicial || [-90, 0, 0];
+  const initRot = initRotDeg.map(d => (d * Math.PI) / 180) as [number, number, number];
+
+  const isIRB140 = robotInfo?.nombre === 'ABB IRB 140';
+
+  const activePivots = customPivots && customPivots.length > 0
+    ? customPivots.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+    : (robotInfo?.visualizacion?.pivots
+      ? robotInfo.visualizacion.pivots.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+      : PIVOTS_HOME);
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -378,9 +457,9 @@ function Scene({
         <meshBasicMaterial color="#ff0000" />
       </mesh>
 
-      {showPivots && PIVOTS_HOME.map((pivot, i) => (
+      {showPivots && activePivots.map((pivot, i) => (
         i > 0 && (
-          <group key={i} rotation={[-Math.PI / 2, 0, 0]} position={[-0.2439, 0, 0.200]}>
+          <group key={i} rotation={initRot} position={initPos}>
             <mesh position={[pivot.x, pivot.y, pivot.z]}>
               <sphereGeometry args={[0.03, 16, 16]} />
               <meshBasicMaterial color="#00ff00" />
@@ -390,7 +469,7 @@ function Scene({
       ))}
 
       {showWorkspace && workspacePoints.length > 0 && (
-        <WorkspaceCloud points={workspacePoints} />
+        <WorkspaceCloud points={workspacePoints} initPos={initPos} initRot={initRot} isIRB140={isIRB140} />
       )}
 
       <Suspense fallback={null}>
@@ -400,6 +479,9 @@ function Scene({
           showTrajectory={showTrajectory}
           onTrajectoryToggle={onTrajectoryToggle}
           onClearTrajectory={onClearTrajectory}
+          customPivots={customPivots}
+          customPositions={customPositions}
+          customTcpOffset={customTcpOffset}
         />
       </Suspense>
 
@@ -423,12 +505,57 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
   const [workspacePoints, setWorkspacePoints] = useState<number[][]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
 
+  // Calibration State
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [selectedLink, setSelectedLink] = useState(0);
+  const [customPivots, setCustomPivots] = useState<number[][]>([]);
+  const [customPositions, setCustomPositions] = useState<number[][]>([]);
+  const [customTcpOffset, setCustomTcpOffset] = useState<[number, number, number]>([0, 0, 0]);
+
+  useEffect(() => {
+    // Reset defaults whenever robot changes
+    if (robotInfo) {
+      setCustomPivots(robotInfo.visualizacion?.pivots ? [...robotInfo.visualizacion.pivots] : []);
+      const links = robotInfo.eslabones || robotInfo.archivos_stl.map(() => ({ posicion_local: [0, 0, 0] as [number, number, number] }));
+      setCustomPositions(links.map(l => l.posicion_local ? [...l.posicion_local] : [0, 0, 0]));
+      setCustomTcpOffset((robotInfo as any).visualizacion?.tcp_offset ? [...(robotInfo as any).visualizacion.tcp_offset] as [number, number, number] : [0, 0, 0]);
+      setSelectedLink(0);
+      setWorkspacePoints([]); // Limpiar la nube de puntos vieja!
+    }
+  }, [robotInfo?.nombre]);
+
+  const updateCustomPivot = (axis: 0 | 1 | 2, val: number) => {
+    const newPivots = [...customPivots];
+    if (newPivots[selectedLink]) {
+      newPivots[selectedLink][axis] = val;
+      setCustomPivots(newPivots);
+    }
+  };
+
+  const updateTcpOffset = (axis: 0 | 1 | 2, val: number) => {
+    const newOffset = [...customTcpOffset] as [number, number, number];
+    newOffset[axis] = val;
+    setCustomTcpOffset(newOffset);
+  };
+
+  const updateCustomPosition = (axis: 0 | 1 | 2, val: number) => {
+    const newPositions = [...customPositions];
+    if (newPositions[selectedLink]) {
+      newPositions[selectedLink][axis] = val;
+      setCustomPositions(newPositions);
+    }
+  };
+
+  const currentPivot = customPivots[selectedLink] || [0, 0, 0];
+  const currentPos = customPositions[selectedLink] || [0, 0, 0];
+
   const fetchWorkspace = async () => {
     if (workspacePoints.length > 0) return;
 
     setIsLoadingWorkspace(true);
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/robot/workspace');
+      const robotId = robotInfo?.nombre?.includes('SCARA') ? 'ABB_IRB_910SC' : 'ABB_IRB_140';
+      const response = await fetch(`http://127.0.0.1:5000/api/robot/workspace?robot_id=${robotId}`);
       const data = await response.json();
       if (data.success) {
         setWorkspacePoints(data.points);
@@ -483,11 +610,23 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
           onClearTrajectory={handleClearTrajectory}
           showWorkspace={showWorkspace}
           workspacePoints={workspacePoints}
+          customPivots={customPivots}
+          customPositions={customPositions}
+          customTcpOffset={customTcpOffset}
         />
       </Canvas>
 
       {/* Controles de visualización */}
       <div className="absolute top-4 right-4 flex flex-col gap-2">
+        <button
+          onClick={() => setIsCalibrating(!isCalibrating)}
+          className={`px-4 py-2 rounded-lg font-medium transition-all shadow-lg flex items-center justify-center gap-2 ${isCalibrating
+            ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
+            : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 backdrop-blur-md border border-white/10'
+            }`}
+        >
+          ⚙️ Calibrar
+        </button>
         <button
           onClick={() => handleTrajectoryToggle(!showTrajectory)}
           className={`px-4 py-2 rounded-lg font-medium transition-all shadow-lg flex items-center justify-center gap-2 ${showTrajectory
@@ -528,14 +667,121 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
       </div>
 
       {/* Leyenda de teclas */}
-      <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl text-[10px] text-gray-300 border border-white/10 shadow-2xl">
-        <div className="font-bold text-cyan-400 mb-2 uppercase tracking-widest border-b border-white/10 pb-1">Atajos</div>
-        <div className="space-y-1">
-          <div className="flex justify-between gap-4"><span>T</span> <span className="text-gray-500">Trayectoria</span></div>
-          <div className="flex justify-between gap-4"><span>C</span> <span className="text-gray-500">Limpiar</span></div>
-          <div className="flex justify-between gap-4"><span>P</span> <span className="text-gray-500">Pivots</span></div>
+      {!isCalibrating && (
+        <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl text-[10px] text-gray-300 border border-white/10 shadow-2xl">
+          <div className="font-bold text-cyan-400 mb-2 uppercase tracking-widest border-b border-white/10 pb-1">Atajos</div>
+          <div className="space-y-1">
+            <div className="flex justify-between gap-4"><span>T</span> <span className="text-gray-500">Trayectoria</span></div>
+            <div className="flex justify-between gap-4"><span>C</span> <span className="text-gray-500">Limpiar</span></div>
+            <div className="flex justify-between gap-4"><span>P</span> <span className="text-gray-500">Pivots</span></div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Panel de Calibración */}
+      {isCalibrating && (
+        <div className="absolute top-4 left-4 bg-black/80 backdrop-blur-md p-4 rounded-xl border border-white/20 shadow-2xl text-white w-80 text-sm overflow-y-auto max-h-[90vh]">
+          <h2 className="text-lg font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Herramienta de Calibración</h2>
+
+          <div className="mb-4">
+            <label className="block text-xs text-gray-400 mb-1 uppercase tracking-wider">Eslabón a calibrar (Index)</label>
+            <select
+              value={selectedLink}
+              onChange={(e) => setSelectedLink(Number(e.target.value))}
+              className="w-full bg-gray-900 border border-white/20 rounded p-2 text-white"
+            >
+              {customPositions.map((_, i) => (
+                <option key={i} value={i}>
+                  {robotInfo?.eslabones?.[i]?.nombre || `Eslabón ${i}`} (Index {i})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="bg-white/5 p-3 rounded-lg mb-4">
+            <h3 className="font-bold text-cyan-400 mb-3 text-xs uppercase">Posición Local (Desfase de la pieza)</h3>
+            <div className="space-y-3">
+              {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+                <div key={`pos-${axis}`} className="flex items-center gap-3">
+                  <span className="w-4 text-gray-400 font-mono">{axis}</span>
+                  <input
+                    type="range"
+                    min="-1" max="1" step="0.005"
+                    value={currentPos[i]}
+                    onChange={(e) => updateCustomPosition(i as 0 | 1 | 2, parseFloat(e.target.value))}
+                    className="flex-1"
+                  />
+                  <input
+                    type="number" step="0.005"
+                    value={currentPos[i]}
+                    onChange={(e) => updateCustomPosition(i as 0 | 1 | 2, parseFloat(e.target.value))}
+                    className="w-16 bg-gray-900 p-1 text-xs rounded border border-white/20"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <h3 className="font-bold text-green-400 mt-5 mb-3 text-xs uppercase">Posición Global del Pivote (Rotación DH)</h3>
+            <div className="space-y-3">
+              {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+                <div key={`piv-${axis}`} className="flex items-center gap-3">
+                  <span className="w-4 text-gray-400 font-mono">{axis}</span>
+                  <input
+                    type="range"
+                    min="-1" max="1" step="0.005"
+                    value={currentPivot[i]}
+                    onChange={(e) => updateCustomPivot(i as 0 | 1 | 2, parseFloat(e.target.value))}
+                    className="flex-1 accent-green-500"
+                  />
+                  <input
+                    type="number" step="0.005"
+                    value={currentPivot[i]}
+                    onChange={(e) => updateCustomPivot(i as 0 | 1 | 2, parseFloat(e.target.value))}
+                    className="w-16 bg-gray-900 p-1 text-xs rounded border border-white/20"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white/5 p-3 rounded-lg mb-4">
+            <h3 className="font-bold text-pink-400 mb-3 text-xs uppercase">Desfase Trayectoria TCP</h3>
+            <div className="space-y-3">
+              {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+                <div key={`tcp-${axis}`} className="flex items-center gap-3">
+                  <span className="w-4 text-gray-400 font-mono">{axis}</span>
+                  <input
+                    type="range"
+                    min="-2" max="2" step="0.005"
+                    value={customTcpOffset[i]}
+                    onChange={(e) => updateTcpOffset(i as 0 | 1 | 2, parseFloat(e.target.value))}
+                    className="flex-1 accent-pink-500"
+                  />
+                  <input
+                    type="number" step="0.005"
+                    value={customTcpOffset[i]}
+                    onChange={(e) => updateTcpOffset(i as 0 | 1 | 2, parseFloat(e.target.value))}
+                    className="w-16 bg-gray-900 p-1 text-xs rounded border border-white/20"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 p-3 bg-gray-900/80 rounded border border-white/10">
+            <div className="text-xs text-gray-400 mb-2">Copia estos valores a `especificaciones_robot.py`:</div>
+            <textarea
+              readOnly
+              className="w-full h-32 bg-black font-mono text-[10px] p-2 text-green-400 rounded outline-none"
+              value={JSON.stringify({
+                pivots: customPivots.map(p => [+p[0].toFixed(3), +p[1].toFixed(3), +p[2].toFixed(3)]),
+                posicion_local_ejemplo: currentPos.map(p => +p.toFixed(3)),
+                tcp_offset: customTcpOffset.map(p => +p.toFixed(3))
+              }, null, 2)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

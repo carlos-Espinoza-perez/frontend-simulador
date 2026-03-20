@@ -6,9 +6,10 @@ interface TelemetryPanelProps {
   jointAngles: number[];
   onClose: () => void;
   currentPosition?: { x: number; y: number; z: number } | null;
+  robotInfo?: any;
 }
 
-export function TelemetryPanel({ jointAngles, onClose, currentPosition }: TelemetryPanelProps) {
+export function TelemetryPanel({ jointAngles, onClose, currentPosition, robotInfo }: TelemetryPanelProps) {
   const { position, isDragging, dragRef, handleMouseDown } = useDraggable({
     initialPosition: { x: window.innerWidth - 752, y: 96 },
   });
@@ -18,14 +19,15 @@ export function TelemetryPanel({ jointAngles, onClose, currentPosition }: Teleme
   const y = currentPosition?.y ?? 0;
   const z = currentPosition?.z ?? 0;
 
-  const joints = [
-    { name: 'J1', angle: jointAngles[0], min: -170, max: 170 },
-    { name: 'J2', angle: jointAngles[1], min: -65, max: 85 },
-    { name: 'J3', angle: jointAngles[2], min: -180, max: 60 },
-    { name: 'J4', angle: jointAngles[3], min: -300, max: 300 },
-    { name: 'J5', angle: jointAngles[4], min: -120, max: 120 },
-    { name: 'J6', angle: jointAngles[5], min: -400, max: 400 },
-  ];
+  const limits = robotInfo?.limites_articulares || [];
+  const units = robotInfo?.tipo === 'SCARA' ? ['°', '°', 'mm', '°'] : ['°', '°', '°', '°', '°', '°', '°'];
+
+  const joints = jointAngles.map((angle, index) => {
+    const min = limits[index] ? limits[index][0] : -360;
+    const max = limits[index] ? limits[index][1] : 360;
+    const unit = units[index] || '°';
+    return { name: `J${index + 1}`, angle, min, max, unit };
+  }).filter((joint) => joint.angle !== undefined);
 
   return (
     <div
@@ -89,7 +91,7 @@ export function TelemetryPanel({ jointAngles, onClose, currentPosition }: Teleme
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-xs text-gray-400 font-mono">{joint.name}</span>
                   <span className={`text-sm font-mono ${isNearLimit ? 'text-yellow-400' : 'text-white'}`}>
-                    {joint.angle.toFixed(1)}°
+                    {joint.angle.toFixed(1)}{joint.unit}
                   </span>
                 </div>
                 <Progress 
@@ -98,8 +100,8 @@ export function TelemetryPanel({ jointAngles, onClose, currentPosition }: Teleme
                   indicatorClassName={isNearLimit ? 'bg-yellow-500' : 'bg-cyan-500'}
                 />
                 <div className="flex justify-between text-xs text-gray-600 mt-1">
-                  <span>{joint.min}°</span>
-                  <span>{joint.max}°</span>
+                  <span>{joint.min}{joint.unit}</span>
+                  <span>{joint.max}{joint.unit}</span>
                 </div>
               </div>
             );
