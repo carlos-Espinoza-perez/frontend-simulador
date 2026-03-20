@@ -1,6 +1,5 @@
 import api from './api';
 
-// Tipos
 export interface Robot {
   id: string;
   nombre: string;
@@ -16,8 +15,7 @@ export interface RobotInfo {
   limites_articulares: [number, number][];
   archivos_stl: string[];
   ruta_stl: string;
-  
-  // Configuración detallada de eslabones
+
   eslabones?: Array<{
     id: number;
     nombre: string;
@@ -27,8 +25,7 @@ export interface RobotInfo {
     eje_rotacion: string;
     color: string;
   }>;
-  
-  // Configuración opcional de visualización
+
   visualizacion?: {
     escala?: number;
     unidades?: string;
@@ -41,8 +38,7 @@ export interface RobotInfo {
       max_distancia?: number;
     };
   };
-  
-  // Configuración opcional de workspace
+
   workspace?: {
     alcance_maximo?: number;
     alcance_minimo?: number;
@@ -53,8 +49,7 @@ export interface RobotInfo {
       division?: number;
     };
   };
-  
-  // Configuración opcional de materiales
+
   materiales?: {
     metalness?: number;
     roughness?: number;
@@ -64,8 +59,7 @@ export interface RobotInfo {
       end_effector?: string;
     };
   };
-  
-  // Metadatos opcionales
+
   metadatos?: {
     fabricante?: string;
     modelo?: string;
@@ -104,19 +98,11 @@ export interface EstadoRobot {
   transformaciones?: number[][][];
 }
 
-// Servicios de la API
-
-/**
- * Verificar estado del servidor
- */
 export const checkHealth = async () => {
   const response = await api.get('/health');
   return response.data;
 };
 
-/**
- * Obtener lista de robots disponibles
- */
 export const getRobotsList = async () => {
   const response = await api.get<{
     success: boolean;
@@ -126,9 +112,6 @@ export const getRobotsList = async () => {
   return response.data;
 };
 
-/**
- * Seleccionar un robot
- */
 export const selectRobot = async (robotId: string) => {
   const response = await api.post<{
     success: boolean;
@@ -138,9 +121,6 @@ export const selectRobot = async (robotId: string) => {
   return response.data;
 };
 
-/**
- * Obtener información del robot actual
- */
 export const getRobotInfo = async () => {
   const response = await api.get<{
     success: boolean;
@@ -149,33 +129,21 @@ export const getRobotInfo = async () => {
   return response.data;
 };
 
-/**
- * Obtener estado actual del robot
- */
 export const getRobotState = async () => {
   const response = await api.get<EstadoRobot>('/api/robot/estado');
   return response.data;
 };
 
-/**
- * Mover el robot a ángulos específicos
- */
 export const moveRobot = async (angulos: number[]) => {
   const response = await api.post<EstadoRobot>('/api/robot/mover', { angulos });
   return response.data;
 };
 
-/**
- * Mover el robot a posición home
- */
 export const moveToHome = async () => {
   const response = await api.post<EstadoRobot>('/api/robot/home');
   return response.data;
 };
 
-/**
- * Calcular cinemática directa sin mover el robot
- */
 export const calculateForwardKinematics = async (angulos: number[]) => {
   const response = await api.post<EstadoRobot>('/api/cinematica/directa', { angulos });
   return response.data;

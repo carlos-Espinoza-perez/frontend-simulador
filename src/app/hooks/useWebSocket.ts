@@ -19,7 +19,6 @@ export function useWebSocket(callbacks: WebSocketCallbacks = {}) {
     onError,
   } = callbacks;
 
-  // Usar refs para los callbacks para evitar reconexiones
   const callbacksRef = useRef(callbacks);
   
   useEffect(() => {
@@ -27,10 +26,9 @@ export function useWebSocket(callbacks: WebSocketCallbacks = {}) {
   }, [callbacks]);
 
   useEffect(() => {
-    // Conectar al WebSocket solo UNA VEZ
+
     websocketService.connect();
 
-    // Registrar listeners con wrappers que usan las refs
     const unsubscribers: (() => void)[] = [];
 
     if (onConexion) {
@@ -73,13 +71,11 @@ export function useWebSocket(callbacks: WebSocketCallbacks = {}) {
       );
     }
 
-    // Cleanup al desmontar
     return () => {
       unsubscribers.forEach((unsub) => unsub());
     };
   }, []); // Array vacío = solo se ejecuta UNA VEZ
 
-  // Funciones para emitir eventos
   const solicitarEstado = useCallback(() => {
     websocketService.solicitarEstado();
   }, []);

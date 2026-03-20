@@ -21,7 +21,6 @@ export function useRobotState() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
 
-  // WebSocket callbacks (opcional - la app funciona sin WebSocket)
   const { solicitarEstado, moverRobot: moverRobotWS } = useWebSocket({
     onConexion: (data) => {
       console.log('WebSocket conectado:', data);
@@ -41,16 +40,14 @@ export function useRobotState() {
     },
     onError: (err) => {
       console.warn('Error WebSocket (no crítico):', err);
-      // No mostrar error al usuario, la app funciona sin WebSocket
+
     },
   });
 
-  // Cargar lista de robots al montar
   useEffect(() => {
     loadRobotsList();
   }, []);
 
-  // Cargar información del robot cuando cambia
   useEffect(() => {
     if (currentRobotId) {
       loadRobotInfo();
@@ -58,7 +55,6 @@ export function useRobotState() {
     }
   }, [currentRobotId]);
 
-  // Polling para actualizar estado si WebSocket no está conectado
   useEffect(() => {
     if (!connected) {
       const interval = setInterval(() => {
@@ -69,9 +65,6 @@ export function useRobotState() {
     }
   }, [connected]);
 
-  /**
-   * Cargar lista de robots disponibles
-   */
   const loadRobotsList = async () => {
     try {
       setLoading(true);
@@ -87,9 +80,6 @@ export function useRobotState() {
     }
   };
 
-  /**
-   * Cargar información del robot actual
-   */
   const loadRobotInfo = async () => {
     try {
       const data = await getRobotInfo();
@@ -101,9 +91,6 @@ export function useRobotState() {
     }
   };
 
-  /**
-   * Cargar estado actual del robot
-   */
   const loadRobotState = async () => {
     try {
       const data = await getRobotState();
@@ -115,9 +102,6 @@ export function useRobotState() {
     }
   };
 
-  /**
-   * Seleccionar un robot diferente
-   */
   const handleSelectRobot = async (robotId: string) => {
     try {
       setLoading(true);
@@ -134,18 +118,14 @@ export function useRobotState() {
     }
   };
 
-  /**
-   * Mover el robot a ángulos específicos
-   */
   const handleMoveRobot = async (angulos: number[]) => {
     try {
       setLoading(true);
-      
-      // Usar WebSocket si está conectado, sino usar API REST
+
       if (connected) {
         console.log('[Robot] Moviendo via WebSocket');
         moverRobotWS(angulos);
-        // El estado se actualizará via evento 'actualizacion_robot'
+
         setError(null);
       } else {
         console.log('[Robot] Moviendo via API REST');
@@ -167,9 +147,6 @@ export function useRobotState() {
     }
   };
 
-  /**
-   * Mover el robot a posición home
-   */
   const handleMoveToHome = async () => {
     try {
       setLoading(true);
@@ -185,7 +162,7 @@ export function useRobotState() {
   };
 
   return {
-    // Estado
+
     robots,
     currentRobotId,
     robotInfo,
@@ -193,8 +170,7 @@ export function useRobotState() {
     loading,
     error,
     connected,
-    
-    // Acciones
+
     selectRobot: handleSelectRobot,
     moveRobot: handleMoveRobot,
     moveToHome: handleMoveToHome,

@@ -14,7 +14,6 @@ export function TelemetryPanel({ jointAngles, onClose, currentPosition, robotInf
     initialPosition: { x: window.innerWidth - 752, y: 96 },
   });
 
-  // Usar la posición real del backend si está disponible
   const x = currentPosition?.x ?? 0;
   const y = currentPosition?.y ?? 0;
   const z = currentPosition?.z ?? 0;
@@ -58,7 +57,7 @@ export function TelemetryPanel({ jointAngles, onClose, currentPosition, robotInf
         </button>
       </div>
 
-      <div className="px-6 pb-6">{/* TCP Position */}
+      <div className="px-6 pb-6">{}
       <div className="mb-6">
         <div className="text-xs text-gray-500 mb-3 uppercase tracking-wide">TCP Position</div>
         <div className="grid grid-cols-3 gap-3">
@@ -77,7 +76,7 @@ export function TelemetryPanel({ jointAngles, onClose, currentPosition, robotInf
         </div>
       </div>
 
-      {/* Joint States */}
+      {}
       <div>
         <div className="text-xs text-gray-500 mb-3 uppercase tracking-wide">Joint States</div>
         <div className="space-y-3">

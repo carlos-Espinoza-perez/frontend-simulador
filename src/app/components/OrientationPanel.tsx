@@ -12,7 +12,6 @@ export function OrientationPanel({ singularityDetected, jointAngles, onClose }: 
     initialPosition: { x: 32, y: 96 },
   });
 
-  // Calculate mock quaternion from joint angles
   const qw = Math.cos(jointAngles[0] / 2) * Math.cos(jointAngles[1] / 2);
   const qx = Math.sin(jointAngles[0] / 2) * Math.cos(jointAngles[1] / 2);
   const qy = Math.cos(jointAngles[0] / 2) * Math.sin(jointAngles[1] / 2);
@@ -47,7 +46,7 @@ export function OrientationPanel({ singularityDetected, jointAngles, onClose }: 
         </button>
       </div>
 
-      <div className="px-6 pb-6">{/* Quaternion Values */}
+      <div className="px-6 pb-6">{}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="bg-black/30 p-3 rounded-lg border border-white/5">
           <div className="text-xs text-gray-500 mb-1">q<sub>w</sub></div>
@@ -67,7 +66,7 @@ export function OrientationPanel({ singularityDetected, jointAngles, onClose }: 
         </div>
       </div>
 
-      {/* 3D Axes Visualization */}
+      {}
       <div className="bg-black/30 p-4 rounded-lg border border-white/5">
         <div className="text-xs text-gray-500 mb-3">Visualización del Triedro</div>
         <div className="relative w-full h-32 flex items-center justify-center">
@@ -79,22 +78,22 @@ export function OrientationPanel({ singularityDetected, jointAngles, onClose }: 
               transition: 'transform 0.3s ease'
             }}
           >
-            {/* X Axis - Red */}
+            {}
             <div className="absolute w-16 h-0.5 bg-red-500 origin-left" style={{ left: '50%', top: '50%' }} />
             <div className="absolute text-xs text-red-400" style={{ left: 'calc(50% + 60px)', top: '50%' }}>X</div>
             
-            {/* Y Axis - Green */}
+            {}
             <div className="absolute w-0.5 h-16 bg-green-500 origin-top" style={{ left: '50%', top: 'calc(50% - 64px)' }} />
             <div className="absolute text-xs text-green-400" style={{ left: '50%', top: 'calc(50% - 70px)' }}>Y</div>
             
-            {/* Z Axis - Blue */}
+            {}
             <div className="absolute w-1 h-1 bg-blue-500 rounded-full" style={{ left: '50%', top: '50%' }} />
             <div className="absolute text-xs text-blue-400" style={{ left: 'calc(50% + 10px)', top: 'calc(50% + 10px)' }}>Z</div>
           </div>
         </div>
       </div>
 
-      {/* Singularity Warning */}
+      {}
       {singularityDetected && (
         <div className="mt-4 bg-red-500/20 border border-red-500 rounded-lg p-3">
           <div className="text-xs text-red-400 font-mono">

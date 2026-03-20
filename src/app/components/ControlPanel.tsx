@@ -58,7 +58,7 @@ export function ControlPanel({
     min: limits[i] ? limits[i][0] : -360,
     max: limits[i] ? limits[i][1] : 360,
     color: defaultColors[i % defaultColors.length],
-    // Helper visual unit
+
     unit: robotInfo?.tipos_articulaciones?.[i] === 'P' ? 'mm' : '°'
   }));
 
@@ -74,7 +74,7 @@ export function ControlPanel({
         zIndex: 30,
       }}
     >
-      {/* Panel Header */}
+      {}
       <div
         data-drag-handle
         className="bg-black/40 px-6 py-4 border-b border-white/10 flex items-center justify-between cursor-grab active:cursor-grabbing"
@@ -91,9 +91,9 @@ export function ControlPanel({
         </button>
       </div>
 
-      {/* Panel Body */}
+      {}
       <div className="p-6 space-y-6 max-h-[calc(100vh-120px)] overflow-y-auto">
-        {/* Robot Selection */}
+        {}
         <div>
           <label className="text-xs text-gray-400 mb-2 block uppercase tracking-wide">
             Selección de Robot
@@ -109,7 +109,7 @@ export function ControlPanel({
           </Select>
         </div>
 
-        {/* Joint Sliders */}
+        {}
         <div className="space-y-5">
           <div className="text-xs text-gray-400 uppercase tracking-wide">
             Control de Articulaciones
@@ -141,7 +141,7 @@ export function ControlPanel({
           ))}
         </div>
 
-        {/* Reset Button */}
+        {}
         <button
           onClick={onReset}
           className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-cyan-500/20"

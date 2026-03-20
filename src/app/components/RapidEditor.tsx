@@ -1,7 +1,7 @@
-import { Terminal, X, GripVertical, Maximize2, Minimize2, Play, Save, FileCode, Loader2, Square, Upload } from 'lucide-react';
+import { Terminal, X, GripVertical, Maximize2, Minimize2, Play, Save, FileCode, Loader2, Square, Upload, Trash2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useDraggable } from '../hooks/useDraggable';
-import Editor from '@monaco-editor/react';
+import Editor, { Monaco } from '@monaco-editor/react';
 import axios from 'axios';
 import websocketService from '../../services/websocketService';
 
@@ -10,6 +10,7 @@ interface RapidEditorProps {
   onExpand?: (expanded: boolean) => void;
   onExecuteMovement?: (joints: number[]) => void;
   externalCode?: string;
+  robotType?: 'ABB IRB 140' | 'IRB 910SC SCARA';
 }
 
 interface Movement {
@@ -38,7 +39,7 @@ const RAPID_TEMPLATE = `MODULE Module1
   ENDPROC
 ENDMODULE`;
 
-export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode }: RapidEditorProps) {
+export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode, robotType }: RapidEditorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [code, setCode] = useState(RAPID_TEMPLATE);
   const [output, setOutput] = useState<string[]>([
@@ -56,7 +57,6 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     initialPosition: { x: window.innerWidth / 2 - 400, y: window.innerHeight - 280 },
   });
 
-  // Actualizar código cuando se recibe código externo
   useEffect(() => {
     if (externalCode) {
       setCode(externalCode);
@@ -64,10 +64,105 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     }
   }, [externalCode]);
 
+  const handleEditorWillMount = (monaco: Monaco) => {
+
+    const isRegistered = monaco.languages.getLanguages().some((lang: any) => lang.id === 'rapid');
+    if (isRegistered) return;
+
+    monaco.languages.register({ id: 'rapid' });
+
+    monaco.languages.setMonarchTokensProvider('rapid', {
+      keywords: [
+        'MODULE', 'ENDMODULE', 'PROC', 'ENDPROC', 'CONST', 'VAR', 'PERS',
+        'MoveJ', 'MoveL', 'MoveAbsJ', 'MoveC', 'fine', 'z10', 'z50', 'v1000', 'v500', 'tool0'
+      ],
+      tokenizer: {
+        root: [
+          [/[a-zA-Z_]\w*/, {
+            cases: {
+              '@keywords': 'keyword',
+              '@default': 'identifier'
+            }
+          }],
+          [/[0-9]+(\.[0-9]+)?([eE][\-+]?[0-9]+)?/, 'number'],
+          [/!.*$/, 'comment'], // Comentarios en RAPID inician con !
+          [/[\[\](){}]/, 'delimiter.bracket'],
+          [/"([^"\\]|\\.)*$/, 'string.invalid'],
+          [/"/, 'string', '@string'],
+        ],
+        string: [
+          [/[^\\"]+/, 'string'],
+          [/\\./, 'string.escape.invalid'],
+          [/"/, 'string', '@pop']
+        ]
+      }
+    });
+
+    monaco.languages.registerCompletionItemProvider('rapid', {
+      provideCompletionItems: (model: any, position: any) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
+        const suggestions = [
+          {
+            label: 'MoveJ',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'MoveJ ${1:P10}, ${2:v1000}, ${3:fine}, ${4:tool0};',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Movimiento articular',
+            range
+          },
+          {
+            label: 'MoveL',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'MoveL ${1:P10}, ${2:v1000}, ${3:fine}, ${4:tool0};',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Movimiento lineal',
+            range
+          },
+          {
+            label: 'MoveAbsJ',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'MoveAbsJ ${1:ZERO\\NoEOffs}, ${2:v1000}, ${3:fine}, ${4:tool0};',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Movimiento a coordenadas articulares',
+            range
+          },
+          {
+            label: 'MODULE',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'MODULE ${1:Module1}\n\t$0\nENDMODULE',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range
+          },
+          {
+            label: 'PROC',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'PROC ${1:main}()\n\t$0\nENDPROC',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range
+          },
+          {
+            label: 'CONST robtarget',
+            kind: monaco.languages.CompletionItemKind.Variable,
+            insertText: 'CONST robtarget ${1:P10}:=[[${2:0},${3:0},${4:0}],[1,0,0,0],[0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]];',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range
+          }
+        ];
+        return { suggestions };
+      }
+    });
+  };
+
   const handleEditorDidMount = (editor: any) => {
     editorRef.current = editor;
 
-    // Configurar tema oscuro personalizado
     editor.updateOptions({
       fontSize: 13,
       minimap: { enabled: isExpanded },
@@ -75,13 +170,18 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       lineNumbers: 'on',
       renderLineHighlight: 'all',
       automaticLayout: true,
-      // Optimizaciones para archivos grandes
-      largeFileOptimizations: true,
-      maxTokenizationLineLength: 20000,
-      // Deshabilitar validación en tiempo real para archivos grandes
-      quickSuggestions: false,
-      parameterHints: { enabled: false },
-      suggestOnTriggerCharacters: false,
+      quickSuggestions: true,
+      parameterHints: { enabled: true },
+      suggestOnTriggerCharacters: true,
+      acceptSuggestionOnEnter: 'on',
+      tabCompletion: 'on',
+    });
+
+    editor.onDidFocusEditorText(() => {
+      window.dispatchEvent(new CustomEvent('monacoFocus', { detail: true }));
+    });
+    editor.onDidBlurEditorText(() => {
+      window.dispatchEvent(new CustomEvent('monacoFocus', { detail: false }));
     });
   };
 
@@ -101,21 +201,20 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
   };
 
   const handleRun = async () => {
-    // Limpiar estado de ejecuciones anteriores
+
     setMovements([]);
     setCurrentStep(0);
     setIsExecuting(true);
     addOutput('> Parseando código RAPID...');
 
-    // Verificar si WebSocket está conectado
     const wsConnected = websocketService.isConnected();
 
     if (useWebSocket && wsConnected) {
-      // Usar WebSocket streaming (más rápido)
+
       addOutput('> Usando WebSocket streaming (modo rápido)');
       executeViaWebSocket();
     } else {
-      // Fallback a API REST
+
       if (useWebSocket && !wsConnected) {
         addOutput('> WebSocket no disponible, usando API REST');
       } else {
@@ -131,43 +230,40 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
 
     websocketService.executeRapidStreaming(
       code,
-      // onPoint: ejecutar cada punto conforme llega
+
       (point: any) => {
         console.log('[RAPID] Punto recibido:', point.step);
         pointCount++;
         setCurrentStep(pointCount);
 
-        // Mostrar mensaje solo en el primer punto de cada movimiento
         if (point.movement_index !== lastMovementIndex) {
           addOutput(`> Movimiento ${point.movement_index + 1}: ${point.type} ${point.target}`);
           lastMovementIndex = point.movement_index;
         }
 
-        // Ejecutar punto inmediatamente
         if (point.joints && onExecuteMovement) {
           onExecuteMovement(point.joints);
 
-          // Mostrar posición solo en puntos finales
           if (!point.is_intermediate && point.position) {
             addOutput(`  → Posición: [${point.position.x.toFixed(1)}, ${point.position.y.toFixed(1)}, ${point.position.z.toFixed(1)}]mm`);
           }
         }
       },
-      // onComplete
+
       () => {
         console.log('[RAPID] Ejecución completada exitosamente');
         addOutput(`> ✓ Programa ejecutado exitosamente (${pointCount} puntos)`);
         setIsExecuting(false);
         setCurrentStep(0);
       },
-      // onError
+
       (error: string) => {
         console.error('[RAPID] Error en ejecución:', error);
         addOutput(`> ✗ Error de ejecución: ${error}`);
         setIsExecuting(false);
         setCurrentStep(0);
       },
-      // onConsole: mensajes de consola del backend
+
       (message: string, type: string) => {
         console.log('[RAPID] Mensaje de consola:', message);
         addOutput(`> ${message}`);
@@ -176,7 +272,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
   };
 
   const executeViaREST = async () => {
-    // Limpiar estado previo
+
     setMovements([]);
     setCurrentStep(0);
 
@@ -241,7 +337,6 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
 
       addOutput(`> Paso ${i + 1}/${movementsList.length}: ${movement.type} ${movement.target}`);
 
-      // Verificar si hay advertencias o errores de IK
       if ((movement as any).warning) {
         addOutput(`  ⚠ ${(movement as any).warning}`);
       }
@@ -255,20 +350,17 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         addOutput(`  ✓ ${(movement as any).ik_message}`);
       }
 
-      // Si el movimiento tiene joints, ejecutarlo
       if (movement.joints && onExecuteMovement) {
         onExecuteMovement(movement.joints);
 
-        // Mostrar información de posición si está disponible
         if (movement.position) {
           addOutput(`  → Posición: [${movement.position.x.toFixed(1)}, ${movement.position.y.toFixed(1)}, ${movement.position.z.toFixed(1)}]mm`);
         }
 
-        // Esperar según la velocidad (simulación)
         const delay = getDelayFromSpeed(movement.speed);
         await sleep(delay);
       } else if (movement.position) {
-        // Movimiento sin joints (IK falló)
+
         addOutput(`  → Posición objetivo: [${movement.position.x}, ${movement.position.y}, ${movement.position.z}]`);
         await sleep(500);
       }
@@ -282,30 +374,23 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       const point = trajectory[i];
       setCurrentStep(i + 1);
 
-      // Mostrar mensaje solo en el primer punto de cada movimiento
       if (point.movement_index !== lastMovementIndex) {
         addOutput(`> Movimiento ${point.movement_index + 1}: ${point.type} ${point.target}`);
         lastMovementIndex = point.movement_index;
       }
 
-      // Verificar errores de IK
       if (point.ik_error) {
         addOutput(`  ✗ ${point.ik_error}`);
         continue;
       }
 
-      // Ejecutar punto
       if (point.joints && onExecuteMovement) {
         onExecuteMovement(point.joints);
 
-        // Mostrar posición solo en puntos finales
         if (!point.is_intermediate && point.position) {
           addOutput(`  → Posición: [${point.position.x.toFixed(1)}, ${point.position.y.toFixed(1)}, ${point.position.z.toFixed(1)}]mm`);
         }
 
-        // Calcular delay realista basado en la velocidad del movimiento
-        // El backend ya calculó los pasos según la velocidad, ahora necesitamos
-        // distribuir el tiempo total del movimiento entre todos los pasos
         const delay = calculateRealisticDelay(point, trajectory, i);
         await sleep(delay);
       }
@@ -313,7 +398,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
   };
 
   const calculateRealisticDelay = (point: any, trajectory: any[], currentIndex: number): number => {
-    // Velocidades típicas del IRB 140 según Robot Studio (mm/s para TCP)
+
     const velocityMap: { [key: string]: number } = {
       'v5': 5,       // 5 mm/s
       'v10': 10,     // 10 mm/s
@@ -342,44 +427,34 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       'v7000': 7000, // 7000 mm/s (velocidad máxima TCP IRB 140)
     };
 
-    // Obtener velocidad del punto (en mm/s)
     const speedStr = point.speed || 'v1000';
     const velocity = velocityMap[speedStr] || 1000;
 
-    // Calcular distancia al siguiente punto
     if (currentIndex < trajectory.length - 1) {
       const nextPoint = trajectory[currentIndex + 1];
 
-      // Si es el mismo movimiento, calcular distancia
       if (nextPoint.movement_index === point.movement_index && point.position && nextPoint.position) {
         const dx = nextPoint.position.x - point.position.x;
         const dy = nextPoint.position.y - point.position.y;
         const dz = nextPoint.position.z - point.position.z;
         const distance = Math.sqrt(dx * dx + dy * dy + dz * dz); // en mm
 
-        // Tiempo = distancia / velocidad (en segundos)
-        // Convertir a milisegundos
         const timeMs = (distance / velocity) * 1000;
 
-        // Permitir delays muy cortos para velocidades altas (tiempo real)
-        // Mínimo 1ms para evitar saturar el navegador
-        // Sin máximo para respetar velocidades muy lentas
         return Math.max(1, timeMs);
       }
     }
 
-    // Delay por defecto basado en velocidad (tiempo real)
-    // Escala: v5 -> 200ms, v100 -> 10ms, v1000 -> 1ms, v7000 -> 0.14ms
     const baseDelay = 1000 / velocity;
     return Math.max(1, baseDelay);
   };
 
   const getDelayFromSpeed = (speed: string): number => {
-    // Extraer número de velocidad (v100, v500, v1000)
+
     const match = speed.match(/v(\d+)/);
     if (match) {
       const speedValue = parseInt(match[1]);
-      // Mapear velocidad a delay (más rápido = menos delay)
+
       return Math.max(500, 2000 - speedValue);
     }
     return 1000;
@@ -391,9 +466,32 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     setOutput(prev => [...prev, message]);
   };
 
-  const handleSave = () => {
-    addOutput(`> Programa guardado: ${new Date().toLocaleTimeString()}`);
-    // Aquí se puede agregar la lógica para guardar el código
+  const handleDownload = async () => {
+    const ROBOT_ID_MAP: Record<string, string> = {
+      'ABB IRB 140': 'ABB_IRB_140',
+      'IRB 910SC SCARA': 'ABB_IRB_910SC',
+    };
+    const robotId = robotType ? ROBOT_ID_MAP[robotType] ?? 'ABB_IRB_140' : 'ABB_IRB_140';
+    const folderName = robotId === 'ABB_IRB_140' ? 'IRB_140' : 'IRB_910SC';
+    try {
+      addOutput(`> Descargando proyecto RobotStudio para ${robotType ?? 'robot'}...`);
+      const response = await axios.post(
+        `http://127.0.0.1:5000/api/rapid/download/${robotId}`,
+        { code },
+        { responseType: 'blob' }
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/zip' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `RobotStudio_${folderName}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      addOutput('> ✓ Proyecto descargado correctamente');
+    } catch (err) {
+      addOutput('> ✗ Error al descargar el proyecto RAPID');
+    }
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -416,7 +514,6 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     fileInputRef.current?.click();
   };
 
-  // Estilos según el estado expandido
   const containerStyle = isExpanded
     ? {
       position: 'fixed' as const,
@@ -442,7 +539,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         }`}
       style={containerStyle}
     >
-      {/* Header */}
+      {}
       <div
         data-drag-handle={!isExpanded}
         className={`bg-[#2d2d30] px-4 py-2 border-b border-white/10 flex items-center justify-between ${!isExpanded ? 'cursor-grab active:cursor-grabbing' : ''
@@ -458,7 +555,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Action Buttons */}
+          {}
           <input
             ref={fileInputRef}
             type="file"
@@ -475,12 +572,12 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
             <span className="hidden sm:inline">Cargar</span>
           </button>
           <button
-            onClick={handleSave}
+            onClick={handleDownload}
             className="text-gray-400 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded flex items-center gap-1.5 text-xs"
-            title="Guardar (Ctrl+S)"
+            title="Descargar proyecto RobotStudio"
           >
             <Save className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Guardar</span>
+            <span className="hidden sm:inline">Descargar</span>
           </button>
 
           {isExecuting && (
@@ -535,15 +632,16 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         </div>
       </div>
 
-      {/* Editor Body */}
-      <div className="flex h-[calc(100%-40px)]">
-        {/* Code Editor */}
-        <div className={`${isExpanded ? 'w-2/3' : 'w-full'} border-r border-white/10`}>
+      {}
+      <div className="flex h-[calc(100%-40px-28px)] mb-7">
+        {}
+        <div className={`${isExpanded ? 'w-2/3' : 'w-full'} border-r border-white/10 overflow-hidden`}>
           <Editor
             height="100%"
-            defaultLanguage="plaintext"
+            language="rapid"
             value={code}
             onChange={(value) => setCode(value || '')}
+            beforeMount={handleEditorWillMount}
             onMount={handleEditorDidMount}
             theme="vs-dark"
             options={{
@@ -558,7 +656,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
               insertSpaces: true,
               formatOnPaste: false, // Desactivar para archivos grandes
               formatOnType: false,  // Desactivar para archivos grandes
-              // Optimizaciones para archivos grandes
+
               largeFileOptimizations: true,
               maxTokenizationLineLength: 20000,
               quickSuggestions: false,
@@ -568,17 +666,24 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
           />
         </div>
 
-        {/* Output Panel (only in expanded mode) */}
+        {}
         {isExpanded && (
           <div className="w-1/3 bg-[#1e1e1e] flex flex-col">
-            <div className="bg-[#2d2d30] px-4 py-2 border-b border-white/10">
+            <div className="bg-[#2d2d30] px-4 py-2 border-b border-white/10 flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <Terminal className="w-3.5 h-3.5 text-cyan-400" />
                 <span className="text-xs uppercase tracking-wider text-gray-400">Salida</span>
               </div>
+              <button 
+                onClick={() => setOutput(['> Consola limpiada.'])}
+                className="text-gray-400 hover:text-red-400 transition-colors p-1 hover:bg-white/10 rounded"
+                title="Limpiar consola"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-xs">
+            <div className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-xs pb-10">
               {output.map((line, index) => {
                 const isError = line.includes('✗') || line.includes('Error');
                 const isSuccess = line.includes('✓');
@@ -609,7 +714,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         )}
       </div>
 
-      {/* Status Bar */}
+      {}
       <div className="absolute bottom-0 left-0 right-0 bg-[#007acc] px-4 py-1 flex items-center justify-between text-xs text-white">
         <div className="flex items-center gap-4">
           <span>Ln {code.split('\n').length}, Col 1</span>

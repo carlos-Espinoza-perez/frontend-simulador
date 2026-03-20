@@ -2,12 +2,13 @@ import { Circle } from 'lucide-react';
 
 interface HeaderProps {
   robotName: string;
+  connected?: boolean;
 }
 
-export function Header({ robotName }: HeaderProps) {
+export function Header({ robotName, connected = true }: HeaderProps) {
   return (
     <header className="relative z-40 flex items-center justify-between px-8 py-4 border-b border-white/10 bg-[#0a0e14]/80 backdrop-blur-md">
-      {/* Left: Logo and Robot Name */}
+      {}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center">
@@ -19,11 +20,13 @@ export function Header({ robotName }: HeaderProps) {
           </div>
         </div>
       </div>
-  
-      {/* Right: System Status */}
-      <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-lg border border-white/10">
-        <Circle className="w-3 h-3 fill-green-500 text-green-500" />
-        <span className="text-sm text-green-400 font-medium">CONECTADO</span>
+
+      {}
+      <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border ${connected ? 'bg-green-500/10 border-green-500/20' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
+        <Circle className={`w-3 h-3 ${connected ? 'fill-green-500 text-green-500' : 'fill-yellow-500 text-yellow-500'}`} />
+        <span className={`text-sm font-medium ${connected ? 'text-green-400' : 'text-yellow-400'}`}>
+          {connected ? 'WebSocket Conectado' : 'REST API'}
+        </span>
       </div>
     </header>
   );

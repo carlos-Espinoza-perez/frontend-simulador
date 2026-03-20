@@ -9,11 +9,8 @@ class WebSocketService {
   private isConnecting: boolean = false;
   private hasConnected: boolean = false;
 
-  /**
-   * Conectar al servidor WebSocket
-   */
   connect() {
-    // Si ya está conectado o conectando, no hacer nada
+
     if (this.socket?.connected || this.isConnecting || this.hasConnected) {
       console.log('[WebSocket] Ya conectado o en proceso de conexión');
       return;
@@ -36,9 +33,6 @@ class WebSocketService {
     console.log('[WebSocket] Conectando...');
   }
 
-  /**
-   * Desconectar del servidor
-   */
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
@@ -47,9 +41,6 @@ class WebSocketService {
     }
   }
 
-  /**
-   * Configurar listeners internos
-   */
   private setupEventListeners() {
     if (!this.socket) return;
 
@@ -66,10 +57,9 @@ class WebSocketService {
     this.socket.on('connect_error', (error) => {
       console.warn('[WebSocket] Error de conexión (continuando sin WebSocket):', error.message);
       this.isConnecting = false;
-      // No es crítico, la app puede funcionar solo con REST API
+
     });
 
-    // Eventos del servidor
     this.socket.on('respuesta_conexion', (data) => {
       console.log('[WebSocket] Respuesta conexión:', data);
       this.emit('respuesta_conexion', data);
@@ -93,16 +83,12 @@ class WebSocketService {
       this.emit('error', data);
     });
 
-    // Eventos de RAPID
     this.socket.on('rapid_console', (data) => {
       console.log('[WebSocket] Mensaje de consola RAPID:', data);
       this.emit('rapid_console', data);
     });
   }
 
-  /**
-   * Emitir evento a listeners registrados
-   */
   private emit(event: string, data: any) {
     const eventListeners = this.listeners.get(event);
     if (eventListeners) {
@@ -110,24 +96,17 @@ class WebSocketService {
     }
   }
 
-  /**
-   * Registrar listener para un evento
-   */
   on(event: string, callback: Function) {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
     this.listeners.get(event)!.add(callback);
 
-    // Retornar función para remover el listener
     return () => {
       this.off(event, callback);
     };
   }
 
-  /**
-   * Remover listener
-   */
   off(event: string, callback: Function) {
     const eventListeners = this.listeners.get(event);
     if (eventListeners) {
@@ -135,27 +114,18 @@ class WebSocketService {
     }
   }
 
-  /**
-   * Solicitar estado actual del robot
-   */
   solicitarEstado() {
     if (this.socket?.connected) {
       this.socket.emit('solicitar_estado');
     }
   }
 
-  /**
-   * Mover robot via WebSocket
-   */
   moverRobot(angulos: number[]) {
     if (this.socket?.connected) {
       this.socket.emit('mover_robot', { angulos });
     }
   }
 
-  /**
-   * Ejecutar código RAPID con streaming de puntos
-   */
   executeRapidStreaming(
     code: string, 
     onPoint: (point: any) => void, 
@@ -170,7 +140,6 @@ class WebSocketService {
 
     console.log('[WebSocket] Iniciando ejecución RAPID streaming');
 
-    // Función para limpiar todos los listeners de esta ejecución
     const cleanup = () => {
       console.log('[WebSocket] Limpiando listeners de ejecución RAPID');
       this.socket?.off('rapid_point', pointListener);
@@ -179,7 +148,6 @@ class WebSocketService {
       this.socket?.off('rapid_console', consoleListener);
     };
 
-    // Registrar listeners para esta ejecución
     const pointListener = (point: any) => {
       console.log('[WebSocket] Punto recibido:', point);
       onPoint(point);
@@ -204,20 +172,15 @@ class WebSocketService {
       }
     };
 
-    // Registrar listeners
     this.socket.on('rapid_point', pointListener);
     this.socket.on('rapid_complete', completeListener);
     this.socket.on('rapid_error', errorListener);
     this.socket.on('rapid_console', consoleListener);
 
-    // Enviar código para ejecución
     console.log('[WebSocket] Enviando código RAPID al servidor');
     this.socket.emit('execute_rapid_stream', { code });
   }
 
-  /**
-   * Abortar ejecución RAPID
-   */
   abortRapidExecution() {
     if (this.socket?.connected) {
       console.log('[WebSocket] Solicitando abortar ejecución RAPID de emergencia');
@@ -225,14 +188,10 @@ class WebSocketService {
     }
   }
 
-  /**
-   * Verificar si está conectado
-   */
   isConnected() {
     return this.socket?.connected || false;
   }
 }
 
-// Exportar instancia singleton
 export const websocketService = new WebSocketService();
 export default websocketService;

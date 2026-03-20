@@ -20,7 +20,7 @@ export function useDraggable(options: UseDraggableOptions = {}) {
   const elementStartPos = useRef<Position>({ x: 0, y: 0 });
 
   const handleMouseDown = (e: MouseEvent<HTMLDivElement>) => {
-    // Solo iniciar drag si se hace clic en el header (elemento con data-drag-handle)
+
     const target = e.target as HTMLElement;
     if (!target.closest('[data-drag-handle]')) return;
 
@@ -40,7 +40,6 @@ export function useDraggable(options: UseDraggableOptions = {}) {
       let newX = elementStartPos.current.x + deltaX;
       let newY = elementStartPos.current.y + deltaY;
 
-      // Aplicar límites
       if (bounds === 'window' && dragRef.current) {
         const rect = dragRef.current.getBoundingClientRect();
         const maxX = window.innerWidth - rect.width;

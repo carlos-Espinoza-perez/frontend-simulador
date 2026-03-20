@@ -49,7 +49,7 @@ export function DHParametersPanel({ jointAngles, onClose }: DHParametersPanelPro
         </button>
       </div>
 
-      <div className="px-6 pb-6">{/* DH Table */}
+      <div className="px-6 pb-6">{}
       <div className="overflow-hidden rounded-lg border border-white/10">
         <table className="w-full text-sm">
           <thead>
@@ -86,7 +86,7 @@ export function DHParametersPanel({ jointAngles, onClose }: DHParametersPanelPro
         </table>
       </div>
 
-      {/* Note */}
+      {}
       <div className="mt-4 text-xs text-gray-500 italic">
         * Los valores de θ<sub>i</sub> se resaltan cuando cambian
       </div>

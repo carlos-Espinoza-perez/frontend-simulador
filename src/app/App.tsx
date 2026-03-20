@@ -27,7 +27,6 @@ export default function App() {
     clearError,
   } = useRobotState();
 
-  // Estados locales para UI
   const [robotType, setRobotType] = useState<'ABB IRB 140' | 'IRB 910SC SCARA'>('ABB IRB 140');
   const [jointAngles, setJointAngles] = useState([0, 0, 0, 0, 0, 0]);
   const [singularityDetected, setSingularityDetected] = useState(false);
@@ -35,7 +34,6 @@ export default function App() {
   const [singularityAnalysis, setSingularityAnalysis] = useState<any>(null);
   const [ikWarning, setIkWarning] = useState<{ message: string; type: 'error' | 'warning' } | null>(null);
 
-  // Escuchar mensajes de consola del WebSocket
   useEffect(() => {
     const cleanup = websocketService.on('rapid_console', (data: any) => {
       if ((data.type === 'error' || data.type === 'warning') && data.message) {
@@ -48,25 +46,22 @@ export default function App() {
     };
   }, []);
 
-  // Sincronizar estado del backend con estado local
   useEffect(() => {
     if (estado?.angulos) {
       setJointAngles(estado.angulos);
     }
-    // Actualizar análisis de singularidades si está disponible
+
     const estadoConAnalisis = estado as any;
     if (estadoConAnalisis?.analisis_singularidades) {
       setSingularityAnalysis(estadoConAnalisis.analisis_singularidades);
     }
   }, [estado]);
 
-  // Sincronizar robot con backend (auto-resync tras restart del servidor)
   useEffect(() => {
     if (robotInfo?.nombre) {
       const backendName = robotInfo.nombre as typeof robotType;
       if (backendName !== robotType && robotType !== 'ABB IRB 140') {
-        // Backend se reinició y está en default (IRB 140), pero el usuario tenía otro robot
-        // Re-enviar la selección del usuario al backend
+
         const robotIdMap: Record<string, string> = {
           'ABB IRB 140': 'ABB_IRB_140',
           'IRB 910SC SCARA': 'ABB_IRB_910SC',
@@ -82,7 +77,6 @@ export default function App() {
     }
   }, [robotInfo]);
 
-  // Panel visibility states
   const [showOrientation, setShowOrientation] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [showDHParameters, setShowDHParameters] = useState(false);
@@ -96,12 +90,11 @@ export default function App() {
     newAngles[index] = value;
     setJointAngles(newAngles);
 
-    // Enviar al backend
     try {
       await moveRobot(newAngles);
     } catch (err) {
       console.error('Error al mover robot:', err);
-      // Revertir cambio si hay error
+
       setJointAngles(estado?.angulos || jointAngles);
     }
   };
@@ -115,7 +108,7 @@ export default function App() {
   };
 
   const handleRobotChange = async (newRobotType: 'ABB IRB 140' | 'IRB 910SC SCARA') => {
-    // Mapear nombre a ID del backend
+
     const robotIdMap: Record<string, string> = {
       'ABB IRB 140': 'ABB_IRB_140',
       'IRB 910SC SCARA': 'ABB_IRB_910SC',
@@ -143,17 +136,15 @@ export default function App() {
       console.log('Joints:', point.joints);
 
       try {
-        // Si no es el primer punto, interpolar desde el punto anterior
+
         if (i > 0) {
           const prevPoint = points[i - 1];
 
           console.log(`Interpolando ${interpolationSteps} pasos desde punto ${i} a punto ${i + 1}`);
 
-          // Interpolar entre los joints del punto anterior y el actual
           for (let step = 1; step <= interpolationSteps; step++) {
             const t = step / interpolationSteps; // Factor de interpolación (0 a 1)
 
-            // Interpolación lineal para cada joint
             const interpolatedJoints = prevPoint.joints.map((prevJoint: number, idx: number) => {
               const currentJoint = point.joints[idx];
               return prevJoint + (currentJoint - prevJoint) * t;
@@ -161,17 +152,15 @@ export default function App() {
 
             await moveRobot(interpolatedJoints);
 
-            // Delay configurable entre pasos de interpolación
             await new Promise(resolve => setTimeout(resolve, stepDelay));
           }
         } else {
-          // Primer punto: mover directamente
+
           await moveRobot(point.joints);
         }
 
         console.log(`Punto ${i + 1} ejecutado exitosamente`);
 
-        // Pausa más larga al llegar a cada punto guardado
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (err) {
         console.error(`Error ejecutando punto ${i + 1}:`, err);
@@ -183,11 +172,10 @@ export default function App() {
   };
 
   const handleExportToRapid = (points: any[]) => {
-    // Generar código RAPID desde los puntos guardados
+
     let rapidCode = `MODULE Module1\n`;
     rapidCode += `  CONST jointtarget ZERO:=[[0,0,0,0,0,0],[9E+9,9E+9,9E+9,9E+9,9E+9,9E+9]];\n`;
 
-    // Generar robtargets para cada punto
     points.forEach((point, index) => {
       const pointName = `P${(index + 1) * 10}`;
       const pos = point.position;
@@ -197,7 +185,6 @@ export default function App() {
     rapidCode += `\n  PROC main()\n`;
     rapidCode += `    MoveAbsJ ZERO\\NoEOffs, v1000, fine, tool0;\n`;
 
-    // Generar movimientos
     points.forEach((point, index) => {
       const pointName = `P${(index + 1) * 10}`;
       const moveType = index === 0 ? 'MoveJ' : 'MoveL';
@@ -208,7 +195,6 @@ export default function App() {
     rapidCode += `  ENDPROC\n`;
     rapidCode += `ENDMODULE`;
 
-    // Actualizar el código y abrir el editor
     setRapidCode(rapidCode);
     setShowEditor(true);
 
@@ -217,19 +203,10 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#0a0e14] font-mono">
-      {/* Background Grid Pattern */}
+      {}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      {/* Connection Status */}
-      <div className="absolute top-2 right-2 z-50">
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs ${connected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-          }`}>
-          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-yellow-400'}`} />
-          {connected ? 'WebSocket Conectado' : 'REST API (Sin WebSocket)'}
-        </div>
-      </div>
-
-      {/* Error Banner */}
+      {}
       {error && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
           <span>{error}</span>
@@ -237,7 +214,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Loading Indicator */}
+      {}
       {loading && (
         <div className="absolute top-16 right-2 z-50">
           <div className="bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 rounded-lg px-3 py-2 flex items-center gap-2 shadow-lg">
@@ -247,10 +224,10 @@ export default function App() {
         </div>
       )}
 
-      {/* Header */}
-      <Header robotName={robotType} />
+      {}
+      <Header robotName={robotType} connected={connected} />
 
-      {/* Main Canvas Area */}
+      {}
       <div
         className="transition-all duration-300"
         style={{
@@ -260,7 +237,7 @@ export default function App() {
         <CanvasViewer jointAngles={jointAngles} robotInfo={robotInfo} />
       </div>
 
-      {/* Floating Panels - Hidden when editor is expanded */}
+      {}
       {!editorExpanded && (
         <>
           {showOrientation && (
@@ -287,7 +264,7 @@ export default function App() {
         </>
       )}
 
-      {/* Control Panel - Always visible */}
+      {}
       {showControl && (
         <ControlPanel
           jointAngles={jointAngles}
@@ -302,7 +279,7 @@ export default function App() {
         />
       )}
 
-      {/* Path Recorder Panel */}
+      {}
       {showPathRecorder && (
         <PathRecorder
           currentJoints={jointAngles}
@@ -313,11 +290,21 @@ export default function App() {
         />
       )}
 
-      {/* RAPID Editor */}
+      {}
       {showEditor && (
         <RapidEditor
           onClose={() => setShowEditor(false)}
-          onExpand={setEditorExpanded}
+          onExpand={(expanded) => {
+            setEditorExpanded(expanded);
+
+            if (expanded) {
+              setShowOrientation(false);
+              setShowTelemetry(false);
+              setShowDHParameters(false);
+              setShowControl(false);
+              setShowPathRecorder(false);
+            }
+          }}
           onExecuteMovement={async (joints) => {
             try {
               await moveRobot(joints);
@@ -326,13 +313,14 @@ export default function App() {
             }
           }}
           externalCode={rapidCode}
+          robotType={robotType}
         />
       )}
 
-      {/* Singularity Alert */}
+      {}
       {singularityDetected && <AlertBanner />}
 
-      {/* IK Warning Banner */}
+      {}
       {ikWarning && (
         <IKWarningBanner
           message={ikWarning.message}
@@ -342,75 +330,69 @@ export default function App() {
         />
       )}
 
-      {/* Left Side Toggle Buttons - Hidden when editor is expanded */}
-      {!editorExpanded && (
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-3">
-          {!showOrientation && (
-            <button
-              onClick={() => setShowOrientation(true)}
-              className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              ORIENTACIÓN
-            </button>
-          )}
-          {!showDHParameters && (
-            <button
-              onClick={() => setShowDHParameters(true)}
-              className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              DENAVIT-HARTENBERG
-            </button>
-          )}
-        </div>
-      )}
+      {}
+      <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-3">
+        {!showOrientation && (
+          <button
+            onClick={() => setShowOrientation(true)}
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
+            style={{ writingMode: 'vertical-rl' }}
+          >
+            ORIENTACIÓN
+          </button>
+        )}
+        {!showDHParameters && (
+          <button
+            onClick={() => setShowDHParameters(true)}
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
+            style={{ writingMode: 'vertical-rl' }}
+          >
+            DENAVIT-HARTENBERG
+          </button>
+        )}
+      </div>
 
-      {/* Right Side Toggle Buttons - Hidden when editor is expanded */}
-      {!editorExpanded && (
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-3">
-          {!showTelemetry && (
-            <button
-              onClick={() => setShowTelemetry(true)}
-              className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              TELEMETRÍA
-            </button>
-          )}
-          {!showControl && (
-            <button
-              onClick={() => setShowControl(true)}
-              className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              CONTROL MANUAL
-            </button>
-          )}
-        </div>
-      )}
+      {}
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-3">
+        {!showTelemetry && (
+          <button
+            onClick={() => setShowTelemetry(true)}
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
+            style={{ writingMode: 'vertical-rl' }}
+          >
+            TELEMETRÍA
+          </button>
+        )}
+        {!showControl && (
+          <button
+            onClick={() => setShowControl(true)}
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg rotate-180"
+            style={{ writingMode: 'vertical-rl' }}
+          >
+            CONTROL MANUAL
+          </button>
+        )}
+      </div>
 
-      {/* Bottom Toggle Buttons */}
-      {!editorExpanded && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-3">
-          {!showEditor && (
-            <button
-              onClick={() => setShowEditor(true)}
-              className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-4 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg"
-            >
-              EDITOR RAPID
-            </button>
-          )}
-          {!showPathRecorder && (
-            <button
-              onClick={() => setShowPathRecorder(true)}
-              className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-4 py-2 text-xs text-green-400 hover:bg-white/20 transition-all duration-200 shadow-lg"
-            >
-              GRABADOR DE TRAYECTORIA
-            </button>
-          )}
-        </div>
-      )}
+      {}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-3">
+        {!showEditor && (
+          <button
+            onClick={() => setShowEditor(true)}
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-4 py-2 text-xs text-cyan-400 hover:bg-white/20 transition-all duration-200 shadow-lg"
+          >
+            EDITOR RAPID
+          </button>
+        )}
+        {!showPathRecorder && (
+          <button
+            onClick={() => setShowPathRecorder(true)}
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-lg px-4 py-2 text-xs text-green-400 hover:bg-white/20 transition-all duration-200 shadow-lg"
+          >
+            GRABADOR DE TRAYECTORIA
+          </button>
+        )}
+      </div>
     </div>
   );
 }

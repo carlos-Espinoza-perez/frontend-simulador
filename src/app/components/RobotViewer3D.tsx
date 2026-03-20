@@ -4,7 +4,6 @@ import { OrbitControls, Grid, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
-
 interface STLModelProps {
   url: string;
   color?: string;
@@ -76,7 +75,7 @@ function TrajectoryLine({
   useFrame(() => {
     if (!showTrajectory) return;
     const currentLen = trajectoryPointsRef.current.length;
-    // Actualiza los puntos reactivamente si hay nuevos puntos reales
+
     if (currentLen > 1 && currentLen !== points.length) {
       setPoints([...trajectoryPointsRef.current]);
     }
@@ -145,7 +144,6 @@ interface RobotViewerProps {
 const DX = 0.247;
 const DY = 0.203;
 
-// Pivots ajustados para centrar visualmente cada articulación
 const PIVOTS_HOME = [
   new THREE.Vector3(0, 0, 0),
   new THREE.Vector3(DX + 0.065, DY, 0),         // J1
@@ -189,7 +187,6 @@ function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPos
     posicion_local: [0, 0, 0] as [number, number, number]
   })) || [];
 
-  // Limpiar trayectoria cuando se solicite
   useEffect(() => {
     if (!showTrajectory && trajectoryPoints.current.length > 0) {
       trajectoryPoints.current = [];
@@ -200,7 +197,6 @@ function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPos
   useFrame(() => {
     if (!robotInfo || !jointAngles || jointAngles.length < 1) return;
 
-    // Validación de seguridad para que ningún cálculo introduzca 'NaN' a la GPU 
     if (jointAngles.some(ang => ang === null || ang === undefined || isNaN(ang))) return;
 
     const q_rad = jointAngles.map(deg => (deg * Math.PI) / 180);
@@ -265,7 +261,7 @@ function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPos
         }
       }
     }
-    // Calcular posición del TCP
+
     const lastPivot = pivots[pivots.length - 1] || new THREE.Vector3();
     const lastAxis = axes[axes.length - 1] || new THREE.Vector3(1, 0, 0);
     
@@ -273,27 +269,20 @@ function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPos
     if (robotInfo?.nombre === 'ABB IRB 140') {
       tcpOffset = 0.065;
     }
-    // Se calcula usando los pivotes que se actualizan correctamente con todos los joints
+
     const tcpPosition = lastPivot.clone().add(lastAxis.clone().multiplyScalar(tcpOffset));
-    
-    // Si hay un customTcpOffset, lo aplicamos para centrar visualmente.
-    // Necesitamos aplicar este desfase rotado junto con el último pivote, 
-    // pero como el offset es habitualmente visual (constante local al TCP),
-    // lo sumamos según los ejes base o ejes rotados. Para simplificar la calibración, 
-    // lo sumamos relativo a los ejes globales para que el usuario pueda alinearlo.
+
     if (customTcpOffset) {
       tcpPosition.add(new THREE.Vector3(customTcpOffset[0], customTcpOffset[1], customTcpOffset[2]));
     }
 
-    // Agregar punto a la trayectoria de forma segura (sin tocar UI)
     if (showTrajectory) {
       if (!lastTcpPosition.current || tcpPosition.distanceTo(lastTcpPosition.current) > 0.001) {
-        // En caso excepcional que la coordenada sea NaN no la guardamos
+
         if (!isNaN(tcpPosition.x) && !isNaN(tcpPosition.y) && !isNaN(tcpPosition.z)) {
           trajectoryPoints.current.push(tcpPosition.clone());
           lastTcpPosition.current = tcpPosition.clone();
 
-          // Límite de puntos para evitar caída de frames por arreglo infinito
           if (trajectoryPoints.current.length > 5000) {
             trajectoryPoints.current.shift();
           }
@@ -322,7 +311,7 @@ function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPos
         );
       })}
 
-      {/* Línea de trayectoria gestionada aisladamente por un componente que maneja el componente Line */}
+      {}
       <TrajectoryLine
         showTrajectory={showTrajectory}
         trajectoryPointsRef={trajectoryPoints}
@@ -361,7 +350,6 @@ function WorkspaceCloud({ points, initPos, initRot, isIRB140 }: { points: number
   );
 }
 
-
 function Scene({
   jointAngles,
   robotInfo,
@@ -372,13 +360,21 @@ function Scene({
   workspacePoints,
   customPivots,
   customPositions,
-  customTcpOffset
-}: RobotViewerProps & { showWorkspace: boolean; workspacePoints: number[][]; customPivots: number[][]; customPositions: number[][]; customTcpOffset: [number, number, number] }) {
+  customTcpOffset,
+  onWorkspaceToggle
+}: RobotViewerProps & { showWorkspace: boolean; workspacePoints: number[][]; customPivots: number[][]; customPositions: number[][]; customTcpOffset: [number, number, number]; onWorkspaceToggle?: () => void }) {
   const gridSize = robotInfo?.workspace?.grid?.tamaño || 10;
   const gridDivision = robotInfo?.workspace?.grid?.division || 0.1;
   const minDistance = robotInfo?.visualizacion?.camara?.min_distancia || 1;
   const maxDistance = robotInfo?.visualizacion?.camara?.max_distancia || 10;
   const [showPivots, setShowPivots] = useState(false);
+  const monacoFocusedRef = useRef(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => { monacoFocusedRef.current = (e as CustomEvent).detail as boolean; };
+    window.addEventListener('monacoFocus', handler);
+    return () => window.removeEventListener('monacoFocus', handler);
+  }, []);
 
   const initPos = robotInfo?.visualizacion?.posicion_inicial
     ? [...robotInfo.visualizacion.posicion_inicial] as [number, number, number]
@@ -397,6 +393,13 @@ function Scene({
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
+
+      if (monacoFocusedRef.current) return;
+      const target = e.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) {
+        return;
+      }
+
       if (e.key === 'p' || e.key === 'P') {
         setShowPivots(prev => !prev);
       }
@@ -406,10 +409,13 @@ function Scene({
       if ((e.key === 'c' || e.key === 'C') && onClearTrajectory) {
         onClearTrajectory();
       }
+      if ((e.key === 'e' || e.key === 'E') && onWorkspaceToggle) {
+        onWorkspaceToggle();
+      }
     };
-    window.addEventListener('keypress', handleKeyPress);
-    return () => window.removeEventListener('keypress', handleKeyPress);
-  }, [showTrajectory, onTrajectoryToggle, onClearTrajectory]);
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [showTrajectory, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle]);
 
   return (
     <>
@@ -505,7 +511,6 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
   const [workspacePoints, setWorkspacePoints] = useState<number[][]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
 
-  // Calibration State
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [selectedLink, setSelectedLink] = useState(0);
   const [customPivots, setCustomPivots] = useState<number[][]>([]);
@@ -513,7 +518,7 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
   const [customTcpOffset, setCustomTcpOffset] = useState<[number, number, number]>([0, 0, 0]);
 
   useEffect(() => {
-    // Reset defaults whenever robot changes
+
     if (robotInfo) {
       setCustomPivots(robotInfo.visualizacion?.pivots ? [...robotInfo.visualizacion.pivots] : []);
       const links = robotInfo.eslabones || robotInfo.archivos_stl.map(() => ({ posicion_local: [0, 0, 0] as [number, number, number] }));
@@ -613,14 +618,15 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
           customPivots={customPivots}
           customPositions={customPositions}
           customTcpOffset={customTcpOffset}
+          onWorkspaceToggle={handleWorkspaceToggle}
         />
       </Canvas>
 
-      {/* Controles de visualización */}
+      {}
       <div className="absolute top-4 right-4 flex flex-col gap-2">
         <button
           onClick={() => setIsCalibrating(!isCalibrating)}
-          className={`px-4 py-2 rounded-lg font-medium transition-all shadow-lg flex items-center justify-center gap-2 ${isCalibrating
+          className={`hidden px-4 py-2 rounded-lg font-medium transition-all shadow-lg items-center justify-center gap-2 ${isCalibrating
             ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
             : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 backdrop-blur-md border border-white/10'
             }`}
@@ -646,6 +652,7 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
             ? 'bg-cyan-500 hover:bg-cyan-600 text-white'
             : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 backdrop-blur-md border border-white/10'
             }`}
+          title="Tecla: E"
         >
           {isLoadingWorkspace ? (
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -666,7 +673,7 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
         )}
       </div>
 
-      {/* Leyenda de teclas */}
+      {}
       {!isCalibrating && (
         <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl text-[10px] text-gray-300 border border-white/10 shadow-2xl">
           <div className="font-bold text-cyan-400 mb-2 uppercase tracking-widest border-b border-white/10 pb-1">Atajos</div>
@@ -674,11 +681,12 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
             <div className="flex justify-between gap-4"><span>T</span> <span className="text-gray-500">Trayectoria</span></div>
             <div className="flex justify-between gap-4"><span>C</span> <span className="text-gray-500">Limpiar</span></div>
             <div className="flex justify-between gap-4"><span>P</span> <span className="text-gray-500">Pivots</span></div>
+            <div className="flex justify-between gap-4"><span>E</span> <span className="text-gray-500">Espacio</span></div>
           </div>
         </div>
       )}
 
-      {/* Panel de Calibración */}
+      {}
       {isCalibrating && (
         <div className="absolute top-4 left-4 bg-black/80 backdrop-blur-md p-4 rounded-xl border border-white/20 shadow-2xl text-white w-80 text-sm overflow-y-auto max-h-[90vh]">
           <h2 className="text-lg font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Herramienta de Calibración</h2>

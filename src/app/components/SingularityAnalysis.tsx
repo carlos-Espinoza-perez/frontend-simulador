@@ -100,7 +100,7 @@ export function SingularityAnalysis({ analisis }: SingularityAnalysisProps) {
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {/* Estado general */}
+        {}
         <div className="flex items-center justify-between p-2 bg-gray-800 rounded">
           <span className="text-xs text-gray-400">Estado:</span>
           <span className={`text-xs font-semibold ${getEstadoColor()}`}>
@@ -108,7 +108,7 @@ export function SingularityAnalysis({ analisis }: SingularityAnalysisProps) {
           </span>
         </div>
 
-        {/* Métricas */}
+        {}
         <div className="grid grid-cols-2 gap-2">
           <div className="p-2 bg-gray-800 rounded">
             <div className="text-xs text-gray-400">Manipulabilidad</div>
@@ -124,7 +124,7 @@ export function SingularityAnalysis({ analisis }: SingularityAnalysisProps) {
           </div>
         </div>
 
-        {/* Singularidades detectadas */}
+        {}
         {singularidades.singularidades.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs font-medium text-gray-400">Singularidades Detectadas:</div>
@@ -146,7 +146,7 @@ export function SingularityAnalysis({ analisis }: SingularityAnalysisProps) {
           </div>
         )}
 
-        {/* Advertencias de límites */}
+        {}
         {limites.advertencias.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs font-medium text-gray-400">Advertencias de Límites:</div>
@@ -167,7 +167,7 @@ export function SingularityAnalysis({ analisis }: SingularityAnalysisProps) {
           </div>
         )}
 
-        {/* Todo OK */}
+        {}
         {singularidades.singularidades.length === 0 && limites.advertencias.length === 0 && (
           <div className="p-3 bg-green-900/20 border border-green-700 rounded text-center">
             <CheckCircle className="w-6 h-6 text-green-500 mx-auto mb-1" />

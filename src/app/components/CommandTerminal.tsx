@@ -35,7 +35,7 @@ export function CommandTerminal({ onClose }: { onClose: () => void }) {
         zIndex: 30,
       }}
     >
-      {/* Terminal Header */}
+      {}
       <div
         data-drag-handle
         className="bg-black/40 px-4 py-2 border-b border-white/10 flex items-center justify-between cursor-grab active:cursor-grabbing"
@@ -53,9 +53,9 @@ export function CommandTerminal({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      {/* Terminal Body */}
+      {}
       <div className="p-4">
-        {/* Command History */}
+        {}
         <div className="h-24 overflow-y-auto mb-3 space-y-1 text-xs font-mono">
           {history.map((line, index) => (
             <div key={index} className="text-green-400/70">
@@ -64,7 +64,7 @@ export function CommandTerminal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        {/* Command Input */}
+        {}
         <form onSubmit={handleSubmit} className="flex items-center gap-2">
           <span className="text-cyan-400 font-mono text-sm">$</span>
           <input
@@ -76,7 +76,7 @@ export function CommandTerminal({ onClose }: { onClose: () => void }) {
           />
         </form>
 
-        {/* Command Examples */}
+        {}
         <div className="mt-3 text-xs text-gray-600">
           <div>Ej: MoveL [x, y, z, rx, ry, rz]</div>
           <div>Ej: MoveJ [j1, j2, j3, j4, j5, j6]</div>

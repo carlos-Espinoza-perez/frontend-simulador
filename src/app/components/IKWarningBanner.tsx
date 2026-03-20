@@ -67,7 +67,7 @@ export function IKWarningBanner({ message, type = 'error', onClose, autoHideDura
             </button>
           </div>
         </div>
-        {/* Progress bar */}
+        {}
         {autoHideDuration > 0 && (
           <div className={`h-1 ${isError ? 'bg-yellow-900/30' : 'bg-orange-900/30'}`}>
             <div

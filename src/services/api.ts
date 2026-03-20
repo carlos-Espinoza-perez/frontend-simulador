@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-// Configuración base de axios
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
 export const api = axios.create({
@@ -11,7 +10,6 @@ export const api = axios.create({
   timeout: 10000,
 });
 
-// Interceptor para logging (opcional)
 api.interceptors.request.use(
   (config) => {
     console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);

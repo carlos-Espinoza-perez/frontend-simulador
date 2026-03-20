@@ -32,14 +32,12 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
     initialPosition: { x: 20, y: window.innerHeight - 520 },
   });
 
-  // Actualizar última posición válida cuando cambia currentPosition
   useEffect(() => {
     if (currentPosition) {
       setLastValidPosition(currentPosition);
     }
   }, [currentPosition]);
 
-  // Usar la última posición válida si currentPosition es null
   const effectivePosition = currentPosition || lastValidPosition;
 
   const handleSavePoint = () => {
@@ -133,7 +131,7 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
       </div>
 
       <div className="p-6 space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-        {/* Guardar punto actual */}
+        {}
         <div className="flex gap-2">
           <input
             type="text"
@@ -153,7 +151,7 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
           </button>
         </div>
 
-        {/* Estado de la posición */}
+        {}
         {!effectivePosition && (
           <div className="text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-700/30 rounded px-3 py-2">
             ⚠️ Esperando datos del robot... Mueve alguna articulación para actualizar.
@@ -169,7 +167,7 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
           </div>
         )}
 
-        {/* Lista de puntos guardados */}
+        {}
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {savedPoints.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
@@ -210,10 +208,10 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
           )}
         </div>
 
-        {/* Acciones */}
+        {}
         {savedPoints.length > 0 && (
           <div className="space-y-3 pt-2 border-t border-white/10">
-            {/* Controles de interpolación */}
+            {}
             <div className="space-y-2">
               <div className="text-xs text-gray-400 uppercase tracking-wide">Configuración de Movimiento</div>
               
@@ -257,7 +255,7 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
               </div>
             </div>
 
-            {/* Botones de acción */}
+            {}
             <div className="flex gap-2">
               <button
                 onClick={handleExecutePath}
@@ -290,7 +288,7 @@ export function PathRecorder({ currentJoints, currentPosition, onExecutePath, on
           </div>
         )}
 
-        {/* Info */}
+        {}
         <div className="text-xs text-gray-500 pt-2 border-t border-white/10">
           <p>💡 Mueve el robot manualmente y guarda cada posición</p>
           <p>💡 Los puntos se ejecutarán en orden secuencial</p>

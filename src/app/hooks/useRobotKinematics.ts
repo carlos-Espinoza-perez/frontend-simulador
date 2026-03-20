@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 
-// Parámetros DH del ABB IRB 140
 interface DHParameter {
   a: number;      // Longitud del eslabón
   alpha: number;  // Ángulo de torsión
@@ -9,7 +8,7 @@ interface DHParameter {
 }
 
 export function useRobotKinematics(jointAngles: number[]) {
-  // Parámetros DH para ABB IRB 140 (ajustar según especificaciones reales)
+
   const dhParameters = useMemo((): DHParameter[] => {
     const deg2rad = Math.PI / 180;
     
@@ -23,7 +22,6 @@ export function useRobotKinematics(jointAngles: number[]) {
     ];
   }, [jointAngles]);
 
-  // Matriz de transformación homogénea
   const getTransformMatrix = (dh: DHParameter) => {
     const ct = Math.cos(dh.theta);
     const st = Math.sin(dh.theta);
@@ -38,7 +36,6 @@ export function useRobotKinematics(jointAngles: number[]) {
     ];
   };
 
-  // Calcular posición del end effector
   const endEffectorPosition = useMemo(() => {
     let T = [
       [1, 0, 0, 0],
@@ -47,7 +44,6 @@ export function useRobotKinematics(jointAngles: number[]) {
       [0, 0, 0, 1],
     ];
 
-    // Multiplicar matrices de transformación
     dhParameters.forEach((dh) => {
       const Ti = getTransformMatrix(dh);
       const newT = [
@@ -74,12 +70,10 @@ export function useRobotKinematics(jointAngles: number[]) {
     };
   }, [dhParameters]);
 
-  // Detectar singularidades (simplificado)
   const detectSingularity = useMemo(() => {
-    // Singularidad cuando J2 y J3 están alineados
+
     const j2j3Aligned = Math.abs(jointAngles[1] + jointAngles[2]) < 5;
-    
-    // Singularidad cuando J5 está cerca de 0
+
     const j5NearZero = Math.abs(jointAngles[4]) < 5;
 
     return j2j3Aligned || j5NearZero;
