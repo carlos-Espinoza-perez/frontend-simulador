@@ -20,7 +20,7 @@ class WebSocketService {
     this.hasConnected = true;
 
     this.socket = io(WS_URL, {
-      transports: ['polling', 'websocket'], // Intentar polling primero
+      transports: ['websocket'], // Forzar WebSocket puro, nada de HTTP polling lento
       reconnection: true,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
