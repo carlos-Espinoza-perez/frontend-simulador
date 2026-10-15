@@ -1,8 +1,10 @@
 import { useRef, useEffect, useState, Suspense, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, Line } from '@react-three/drei';
+import { Maximize2, Minimize2, RotateCcw, Keyboard } from 'lucide-react';
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import api from '../../services/api';
 
 interface STLModelProps {
   url: string;
@@ -99,7 +101,7 @@ function TrajectoryLine({
   );
 }
 
-interface RobotViewerProps {
+export interface RobotViewerProps {
   jointAngles: number[];
   robotInfo?: {
     archivos_stl: string[];
@@ -136,6 +138,15 @@ interface RobotViewerProps {
   showTrajectory?: boolean;
   onTrajectoryToggle?: (show: boolean) => void;
   onClearTrajectory?: () => void;
+  clearTrajectoryTrigger?: number;
+  showWorkspace?: boolean;
+  onWorkspaceToggle?: () => void;
+  showPivots?: boolean;
+  onPivotsToggle?: (show: boolean) => void;
+  resetCameraTrigger?: number;
+  onResetCamera?: () => void;
+  isViewerExpanded?: boolean;
+  onToggleViewerExpanded?: () => void;
   customPivots?: number[][];
   customPositions?: number[][];
   customTcpOffset?: [number, number, number];
@@ -350,6 +361,35 @@ function WorkspaceCloud({ points, initPos, initRot, isIRB140 }: { points: number
   );
 }
 
+const DEFAULT_CAMERA_POS: [number, number, number] = [1.3, 1.0, 1.3];
+const DEFAULT_ORBIT_TARGET: [number, number, number] = [DX, 0.42, DY];
+
+function CameraResetEffect({
+  resetCameraTrigger,
+  cameraPosition,
+  controlsRef,
+}: {
+  resetCameraTrigger?: number;
+  cameraPosition: [number, number, number];
+  controlsRef: React.MutableRefObject<any>;
+}) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
+    if (controlsRef.current) {
+      controlsRef.current.target.set(
+        DEFAULT_ORBIT_TARGET[0],
+        DEFAULT_ORBIT_TARGET[1],
+        DEFAULT_ORBIT_TARGET[2]
+      );
+      controlsRef.current.update();
+    }
+  }, [resetCameraTrigger, cameraPosition[0], cameraPosition[1], cameraPosition[2], DEFAULT_ORBIT_TARGET[1]]);
+
+  return null;
+}
+
 function Scene({
   jointAngles,
   robotInfo,
@@ -358,16 +398,30 @@ function Scene({
   onClearTrajectory,
   showWorkspace,
   workspacePoints,
+  showPivots,
+  onPivotsToggle,
+  resetCameraTrigger,
   customPivots,
   customPositions,
   customTcpOffset,
   onWorkspaceToggle
-}: RobotViewerProps & { showWorkspace: boolean; workspacePoints: number[][]; customPivots: number[][]; customPositions: number[][]; customTcpOffset: [number, number, number]; onWorkspaceToggle?: () => void }) {
+}: RobotViewerProps & {
+  showWorkspace: boolean;
+  workspacePoints: number[][];
+  showPivots: boolean;
+  onPivotsToggle?: (show: boolean) => void;
+  resetCameraTrigger?: number;
+  customPivots: number[][];
+  customPositions: number[][];
+  customTcpOffset: [number, number, number];
+  onWorkspaceToggle?: () => void;
+}) {
   const gridSize = robotInfo?.workspace?.grid?.tamaño || 10;
   const gridDivision = robotInfo?.workspace?.grid?.division || 0.1;
-  const minDistance = robotInfo?.visualizacion?.camara?.min_distancia || 1;
+  const minDistance = 0.4;
   const maxDistance = robotInfo?.visualizacion?.camara?.max_distancia || 10;
-  const [showPivots, setShowPivots] = useState(false);
+  const cameraPosition = DEFAULT_CAMERA_POS;
+  const controlsRef = useRef<any>(null);
   const monacoFocusedRef = useRef(false);
 
   useEffect(() => {
@@ -393,15 +447,14 @@ function Scene({
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
-
       if (monacoFocusedRef.current) return;
       const target = e.target as HTMLElement;
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) {
         return;
       }
 
-      if (e.key === 'p' || e.key === 'P') {
-        setShowPivots(prev => !prev);
+      if ((e.key === 'p' || e.key === 'P') && onPivotsToggle) {
+        onPivotsToggle(!showPivots);
       }
       if ((e.key === 't' || e.key === 'T') && onTrajectoryToggle) {
         onTrajectoryToggle(!showTrajectory);
@@ -415,10 +468,15 @@ function Scene({
     };
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [showTrajectory, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle]);
+  }, [showTrajectory, showPivots, onPivotsToggle, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle]);
 
   return (
     <>
+      <CameraResetEffect
+        resetCameraTrigger={resetCameraTrigger}
+        cameraPosition={cameraPosition}
+        controlsRef={controlsRef}
+      />
       <ambientLight intensity={0.4} />
       <hemisphereLight args={['#ffffff', '#444444', 0.6]} />
       <directionalLight
@@ -492,40 +550,64 @@ function Scene({
       </Suspense>
 
       <OrbitControls
+        ref={controlsRef}
         enableDamping
         dampingFactor={0.05}
         minDistance={minDistance}
         maxDistance={maxDistance}
         maxPolarAngle={Math.PI / 2}
-        target={[DX, -0, DY]}
+        target={DEFAULT_ORBIT_TARGET}
       />
     </>
   );
 }
 
-export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
-  const cameraPosition = robotInfo?.visualizacion?.camara?.posicion || [2, 1.5, 2];
-  const cameraFov = robotInfo?.visualizacion?.camara?.fov || 50;
-  const [showTrajectory, setShowTrajectory] = useState(false);
-  const [showWorkspace, setShowWorkspace] = useState(false);
+export function RobotViewer3D({
+  jointAngles,
+  robotInfo,
+  showTrajectory: externalShowTrajectory,
+  onTrajectoryToggle: externalOnTrajectoryToggle,
+  clearTrajectoryTrigger,
+  showWorkspace: externalShowWorkspace,
+  onWorkspaceToggle: externalOnWorkspaceToggle,
+  showPivots: externalShowPivots,
+  onPivotsToggle: externalOnPivotsToggle,
+  resetCameraTrigger: externalResetCameraTrigger,
+  onResetCamera: externalOnResetCamera,
+  isViewerExpanded = false,
+  onToggleViewerExpanded,
+  customTcpOffset: externalTcpOffset,
+}: RobotViewerProps) {
+  const cameraPosition = DEFAULT_CAMERA_POS;
+  const cameraFov = 45;
+  const [internalShowTrajectory, setInternalShowTrajectory] = useState(false);
+  const [internalShowWorkspace, setInternalShowWorkspace] = useState(false);
+  const [internalShowPivots, setInternalShowPivots] = useState(false);
+  const [internalResetCamera, setInternalResetCamera] = useState(0);
+  const [showShortcutsHint, setShowShortcutsHint] = useState(false);
   const [workspacePoints, setWorkspacePoints] = useState<number[][]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
+
+  const showTrajectory = externalShowTrajectory ?? internalShowTrajectory;
+  const showWorkspace = externalShowWorkspace ?? internalShowWorkspace;
+  const showPivots = externalShowPivots ?? internalShowPivots;
+  const effectiveResetCameraTrigger = (externalResetCameraTrigger ?? 0) + internalResetCamera;
 
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [selectedLink, setSelectedLink] = useState(0);
   const [customPivots, setCustomPivots] = useState<number[][]>([]);
   const [customPositions, setCustomPositions] = useState<number[][]>([]);
   const [customTcpOffset, setCustomTcpOffset] = useState<[number, number, number]>([0, 0, 0]);
+  const activeTcpOffset = externalTcpOffset ?? customTcpOffset;
 
   useEffect(() => {
-
     if (robotInfo) {
       setCustomPivots(robotInfo.visualizacion?.pivots ? [...robotInfo.visualizacion.pivots] : []);
       const links = robotInfo.eslabones || robotInfo.archivos_stl.map(() => ({ posicion_local: [0, 0, 0] as [number, number, number] }));
       setCustomPositions(links.map(l => l.posicion_local ? [...l.posicion_local] : [0, 0, 0]));
       setCustomTcpOffset((robotInfo as any).visualizacion?.tcp_offset ? [...(robotInfo as any).visualizacion.tcp_offset] as [number, number, number] : [0, 0, 0]);
       setSelectedLink(0);
-      setWorkspacePoints([]); // Limpiar la nube de puntos vieja!
+      setWorkspacePoints([]);
     }
   }, [robotInfo?.nombre]);
 
@@ -555,15 +637,14 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
   const currentPos = customPositions[selectedLink] || [0, 0, 0];
 
   const fetchWorkspace = async () => {
-    if (workspacePoints.length > 0) return;
+    if (workspacePoints.length > 0 || isLoadingWorkspace) return;
 
     setIsLoadingWorkspace(true);
     try {
       const robotId = robotInfo?.nombre?.includes('SCARA') ? 'ABB_IRB_910SC' : 'ABB_IRB_140';
-      const response = await fetch(`http://127.0.0.1:5000/api/robot/workspace?robot_id=${robotId}`);
-      const data = await response.json();
-      if (data.success) {
-        setWorkspacePoints(data.points);
+      const response = await api.get(`/api/robot/workspace`, { params: { robot_id: robotId } });
+      if (response.data?.success) {
+        setWorkspacePoints(response.data.points);
       }
     } catch (err) {
       console.error('Error cargando workspace:', err);
@@ -572,20 +653,50 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
     }
   };
 
+  useEffect(() => {
+    if (showWorkspace && workspacePoints.length === 0) {
+      fetchWorkspace();
+    }
+  }, [showWorkspace]);
+
   const handleTrajectoryToggle = (show: boolean) => {
-    setShowTrajectory(show);
+    if (externalOnTrajectoryToggle) {
+      externalOnTrajectoryToggle(show);
+    } else {
+      setInternalShowTrajectory(show);
+    }
   };
 
   const handleClearTrajectory = () => {
-    setShowTrajectory(false);
-    setTimeout(() => setShowTrajectory(true), 50);
+    handleTrajectoryToggle(false);
+    setTimeout(() => handleTrajectoryToggle(true), 40);
   };
 
-  const handleWorkspaceToggle = () => {
-    if (!showWorkspace && workspacePoints.length === 0) {
-      fetchWorkspace();
+  useEffect(() => {
+    if (clearTrajectoryTrigger && clearTrajectoryTrigger > 0) {
+      handleClearTrajectory();
     }
-    setShowWorkspace(!showWorkspace);
+  }, [clearTrajectoryTrigger]);
+
+  const handleWorkspaceToggle = () => {
+    if (externalOnWorkspaceToggle) {
+      externalOnWorkspaceToggle();
+    } else {
+      setInternalShowWorkspace(!showWorkspace);
+    }
+  };
+
+  const handlePivotsToggle = (show: boolean) => {
+    if (externalOnPivotsToggle) {
+      externalOnPivotsToggle(show);
+    } else {
+      setInternalShowPivots(show);
+    }
+  };
+
+  const handleResetCameraClick = () => {
+    setInternalResetCamera(c => c + 1);
+    externalOnResetCamera?.();
   };
 
   return (
@@ -615,78 +726,97 @@ export function RobotViewer3D({ jointAngles, robotInfo }: RobotViewerProps) {
           onClearTrajectory={handleClearTrajectory}
           showWorkspace={showWorkspace}
           workspacePoints={workspacePoints}
+          showPivots={showPivots}
+          onPivotsToggle={handlePivotsToggle}
+          resetCameraTrigger={effectiveResetCameraTrigger}
           customPivots={customPivots}
           customPositions={customPositions}
-          customTcpOffset={customTcpOffset}
+          customTcpOffset={activeTcpOffset}
           onWorkspaceToggle={handleWorkspaceToggle}
         />
       </Canvas>
 
-      {}
-      <div className="absolute top-4 right-4 flex flex-col gap-2">
-        <button
-          onClick={() => setIsCalibrating(!isCalibrating)}
-          className={`hidden px-4 py-2 rounded-lg font-medium transition-all shadow-lg items-center justify-center gap-2 ${isCalibrating
-            ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-            : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 backdrop-blur-md border border-white/10'
-            }`}
-        >
-          ⚙️ Calibrar
-        </button>
-        <button
-          onClick={() => handleTrajectoryToggle(!showTrajectory)}
-          className={`px-4 py-2 rounded-lg font-medium transition-all shadow-lg flex items-center justify-center gap-2 ${showTrajectory
-            ? 'bg-green-500 hover:bg-green-600 text-white'
-            : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 backdrop-blur-md border border-white/10'
-            }`}
-          title="Tecla: T"
-        >
-          <div className={`w-2 h-2 rounded-full ${showTrajectory ? 'bg-white animate-pulse' : 'bg-gray-500'}`} />
-          Trayectoria
-        </button>
-
-        <button
-          onClick={handleWorkspaceToggle}
-          disabled={isLoadingWorkspace}
-          className={`px-4 py-2 rounded-lg font-medium transition-all shadow-lg flex items-center justify-center gap-2 ${showWorkspace
-            ? 'bg-cyan-500 hover:bg-cyan-600 text-white'
-            : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 backdrop-blur-md border border-white/10'
-            }`}
-          title="Tecla: E"
-        >
-          {isLoadingWorkspace ? (
-            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-          ) : (
-            <div className={`w-2 h-2 rounded-full ${showWorkspace ? 'bg-white animate-pulse' : 'bg-gray-500'}`} />
+      {/* Indicadores discretos de capas activas */}
+      {(showTrajectory || showWorkspace || showPivots || isLoadingWorkspace) && (
+        <div className="absolute top-16 left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/55 border border-white/10 backdrop-blur-md text-[10px]">
+          {showTrajectory && (
+            <span className="flex items-center gap-1 text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Trazo TCP
+            </span>
           )}
-          Espacio de Trabajo
-        </button>
+          {showWorkspace && (
+            <span className="flex items-center gap-1 text-cyan-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              {isLoadingWorkspace ? 'Cargando espacio...' : 'Espacio'}
+            </span>
+          )}
+          {showPivots && (
+            <span className="flex items-center gap-1 text-lime-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-lime-400" />
+              Pivotes
+            </span>
+          )}
+        </div>
+      )}
 
-        {showTrajectory && (
-          <button
-            onClick={handleClearTrajectory}
-            className="px-4 py-2 rounded-lg font-medium bg-red-500/80 hover:bg-red-600 text-white transition-all shadow-lg backdrop-blur-md border border-red-400/20"
-            title="Tecla: C"
-          >
-            Limpiar Trayectoria
-          </button>
-        )}
-      </div>
-
-      {}
+      {/* Leyenda discreta de ejes + atajos plegables en esquina inferior izquierda */}
       {!isCalibrating && (
-        <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl text-[10px] text-gray-300 border border-white/10 shadow-2xl">
-          <div className="font-bold text-cyan-400 mb-2 uppercase tracking-widest border-b border-white/10 pb-1">Atajos</div>
-          <div className="space-y-1">
-            <div className="flex justify-between gap-4"><span>T</span> <span className="text-gray-500">Trayectoria</span></div>
-            <div className="flex justify-between gap-4"><span>C</span> <span className="text-gray-500">Limpiar</span></div>
-            <div className="flex justify-between gap-4"><span>P</span> <span className="text-gray-500">Pivots</span></div>
-            <div className="flex justify-between gap-4"><span>E</span> <span className="text-gray-500">Espacio</span></div>
+        <div className="absolute bottom-3 left-3 z-20 flex items-end gap-2 select-none">
+          <div className="bg-black/55 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-white/10 flex items-center gap-3 text-[10px] text-gray-400 shadow-lg">
+            <span className="text-[9px] uppercase tracking-wider text-gray-500 font-semibold">Ejes</span>
+            <span className="flex items-center gap-1 text-red-400 font-mono">
+              <span className="w-2.5 h-0.5 bg-red-500 inline-block" />X
+            </span>
+            <span className="flex items-center gap-1 text-emerald-400 font-mono">
+              <span className="w-2.5 h-0.5 bg-emerald-500 inline-block" />Y
+            </span>
+            <span className="flex items-center gap-1 text-blue-400 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />Z
+            </span>
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => setShowShortcutsHint(v => !v)}
+              className={`px-2 py-1.5 rounded-lg border backdrop-blur-md text-[10px] flex items-center gap-1 transition-colors shadow-lg ${
+                showShortcutsHint
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/40'
+                  : 'bg-black/55 text-gray-400 hover:text-gray-200 border-white/10'
+              }`}
+              title="Mostrar/ocultar atajos de teclado"
+            >
+              <Keyboard className="w-3 h-3" />
+              <span>Atajos</span>
+            </button>
+
+            {showShortcutsHint && (
+              <div className="absolute bottom-9 left-0 bg-[#0d131c]/95 backdrop-blur-md px-3 py-2.5 rounded-lg text-[10px] text-gray-300 border border-white/15 shadow-2xl w-40 space-y-1">
+                <div className="font-semibold text-cyan-400 uppercase tracking-wider border-b border-white/10 pb-1 mb-1">
+                  Teclado
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">T</kbd>
+                  <span className="text-gray-400">Trazo TCP</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">C</kbd>
+                  <span className="text-gray-400">Limpiar trazo</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">P</kbd>
+                  <span className="text-gray-400">Pivotes DH</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">E</kbd>
+                  <span className="text-gray-400">Espacio trabajo</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {}
       {isCalibrating && (
         <div className="absolute top-4 left-4 bg-black/80 backdrop-blur-md p-4 rounded-xl border border-white/20 shadow-2xl text-white w-80 text-sm overflow-y-auto max-h-[90vh]">
           <h2 className="text-lg font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Herramienta de Calibración</h2>
