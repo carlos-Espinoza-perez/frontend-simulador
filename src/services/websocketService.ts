@@ -1,13 +1,14 @@
 import { io, Socket } from 'socket.io-client';
 import { EstadoRobot } from './robotService';
 
-const WS_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+const WS_URL = import.meta.env.VITE_API_URL || undefined;
 
 class WebSocketService {
   private socket: Socket | null = null;
   private listeners: Map<string, Set<Function>> = new Map();
   private isConnecting: boolean = false;
   private hasConnected: boolean = false;
+  private rapidCleanup: (() => void) | null = null;
 
   connect() {
 
@@ -83,6 +84,10 @@ class WebSocketService {
       this.emit('error', data);
     });
 
+    this.socket.on('vision_procesada', (data) => {
+      this.emit('vision_procesada', data);
+    });
+
     this.socket.on('rapid_console', (data) => {
       console.log('[WebSocket] Mensaje de consola RAPID:', data);
       this.emit('rapid_console', data);
@@ -138,18 +143,21 @@ class WebSocketService {
       return;
     }
 
-    console.log('[WebSocket] Iniciando ejecución RAPID streaming');
+    if (this.rapidCleanup) {
+      this.rapidCleanup();
+      this.rapidCleanup = null;
+    }
 
     const cleanup = () => {
-      console.log('[WebSocket] Limpiando listeners de ejecución RAPID');
       this.socket?.off('rapid_point', pointListener);
       this.socket?.off('rapid_complete', completeListener);
       this.socket?.off('rapid_error', errorListener);
       this.socket?.off('rapid_console', consoleListener);
+      this.rapidCleanup = null;
     };
+    this.rapidCleanup = cleanup;
 
     const pointListener = (point: any) => {
-      console.log('[WebSocket] Punto recibido:', point);
       onPoint(point);
     };
 
@@ -182,8 +190,11 @@ class WebSocketService {
   }
 
   abortRapidExecution() {
+    if (this.rapidCleanup) {
+      this.rapidCleanup();
+      this.rapidCleanup = null;
+    }
     if (this.socket?.connected) {
-      console.log('[WebSocket] Solicitando abortar ejecución RAPID de emergencia');
       this.socket.emit('abort_rapid_execution');
     }
   }

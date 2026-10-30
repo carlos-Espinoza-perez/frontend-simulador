@@ -1,13 +1,19 @@
-import { useState, useEffect } from 'react';
-import { FileCode, Route, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import geometryService from '../services/geometryService';
+import { FileCode, Route, RotateCcw, Camera, Sliders, Layers } from 'lucide-react';
 import { Header, SpaViewMode } from './components/Header';
 import { CanvasViewer } from './components/CanvasViewer';
 import { RapidEditor } from './components/RapidEditor';
 import { SavedPoint } from './components/PathRecorder';
 import { ContextualToolPanel, ContextualCategory } from './components/ContextualToolPanel';
 import { VisionCalibrationPanel } from './components/VisionCalibrationPanel';
+import { PythonIDEView } from './components/PythonIDE/PythonIDEView';
+import { DynamicWorkspace } from './components/DynamicWorkspace';
+import { SnapLayout } from './components/SnapLayoutSelector';
+import { FloatingPanel } from './components/FloatingPanel';
 import { AlertBanner } from './components/AlertBanner';
 import { IKWarningBanner } from './components/IKWarningBanner';
+import { CollisionAlertBanner } from './components/CollisionAlertBanner';
 import { useRobotState } from './hooks/useRobotState';
 import websocketService from '../services/websocketService';
 
@@ -45,8 +51,37 @@ export default function App() {
     };
   }, []);
 
+  const lastSafeAnglesRef = useRef<number[]>([0, 0, 0, 0, 0, 0]);
+
+  useEffect(() => {
+    const unsubCol = geometryService.suscribirColisiones((cols) => {
+      if (cols.length > 0) {
+        websocketService.abortRapidExecution();
+        setJointAngles([...lastSafeAnglesRef.current]);
+      }
+    });
+    return unsubCol;
+  }, []);
+
   useEffect(() => {
     if (estado?.angulos) {
+      const pred = geometryService.predecirColision(estado.angulos);
+      if (pred.hayColision) {
+        websocketService.abortRapidExecution();
+        geometryService.dispararAlerta({
+          activa: true,
+          tipo: 'predictiva',
+          titulo: 'PARADA INMEDIATA POR COLISIÓN',
+          mensaje: 'Colisión inminente',
+          detalle: pred.detalle || `Detenido antes de penetrar ${pred.obstaculo}`,
+          obstaculo: pred.obstaculo || 'Obstáculo en celda',
+          link: pred.link || 'Manipulador',
+          timestamp: Date.now(),
+        });
+        setJointAngles([...lastSafeAnglesRef.current]);
+        return;
+      }
+      lastSafeAnglesRef.current = [...estado.angulos];
       setJointAngles(estado.angulos);
     }
 
@@ -86,16 +121,29 @@ export default function App() {
   const [customTcpOffset, setCustomTcpOffset] = useState<[number, number, number]>([0, 0, 0]);
   const [savedPoints, setSavedPoints] = useState<SavedPoint[]>([]);
 
+  const [snapLayout, setSnapLayout] = useState<SnapLayout>(() => {
+    const p = window.location.pathname.toLowerCase();
+    return p.startsWith('/mosaico') || p.startsWith('/quad') || p.startsWith('/split')
+      ? 'quad'
+      : 'single';
+  });
+  const [floatingCamera, setFloatingCamera] = useState(false);
+  const [floatingJoints, setFloatingJoints] = useState(false);
+
   const obtenerVistaPorUrl = (): SpaViewMode => {
     const path = window.location.pathname.toLowerCase();
-    return path.startsWith('/vision') || path.startsWith('/calibracion')
-      ? 'vision'
-      : 'simulador';
+    if (path.startsWith('/vision') || path.startsWith('/calibracion')) {
+      return 'vision';
+    }
+    if (path.startsWith('/python-ide') || path.startsWith('/ide')) {
+      return 'python-ide';
+    }
+    return 'simulador';
   };
 
   const [activeView, setActiveView] = useState<SpaViewMode>(obtenerVistaPorUrl);
   const [simuladorVisitado, setSimuladorVisitado] = useState<boolean>(
-    () => obtenerVistaPorUrl() === 'simulador'
+    () => obtenerVistaPorUrl() === 'simulador' || window.location.pathname.includes('mosaico')
   );
   const [rapidCode, setRapidCode] = useState<string>('');
 
@@ -104,7 +152,12 @@ export default function App() {
     if (nuevaVista === 'simulador') {
       setSimuladorVisitado(true);
     }
-    const rutaObjetivo = nuevaVista === 'vision' ? '/vision' : '/';
+    const rutaObjetivo =
+      nuevaVista === 'vision'
+        ? '/vision'
+        : nuevaVista === 'python-ide'
+        ? '/python-ide'
+        : '/';
     if (window.location.pathname !== rutaObjetivo) {
       window.history.pushState({ view: nuevaVista }, '', rutaObjetivo);
     }
@@ -125,13 +178,27 @@ export default function App() {
   const handleJointChange = async (index: number, value: number) => {
     const newAngles = [...jointAngles];
     newAngles[index] = value;
+    const pred = geometryService.predecirColision(newAngles);
+    if (pred.hayColision) {
+      geometryService.dispararAlerta({
+        activa: true,
+        tipo: 'predictiva',
+        titulo: 'MOVIMIENTO BLOQUEADO',
+        mensaje: 'Colisión inminente',
+        detalle: pred.detalle || `Bloqueado por proximidad a ${pred.obstaculo}`,
+        obstaculo: pred.obstaculo || 'Obstáculo',
+        link: pred.link || 'Manipulador',
+        timestamp: Date.now(),
+      });
+      return;
+    }
+    lastSafeAnglesRef.current = [...newAngles];
     setJointAngles(newAngles);
 
     try {
       await moveRobot(newAngles);
     } catch (err) {
       console.error('Error al mover robot:', err);
-
       setJointAngles(estado?.angulos || jointAngles);
     }
   };
@@ -256,20 +323,34 @@ export default function App() {
         </div>
       )}
 
+      <CollisionAlertBanner />
       <Header
         robotName={robotType}
         connected={connected}
         activeView={activeView}
-        onViewChange={cambiarVista}
+        onViewChange={(v) => {
+          setSnapLayout('single');
+          cambiarVista(v);
+        }}
+        currentLayout={snapLayout}
+        onSelectLayout={(l) => {
+          setSnapLayout(l);
+          if (l !== 'single') {
+            setSimuladorVisitado(true);
+          }
+        }}
+        floatingCamera={floatingCamera}
+        onToggleFloatingCamera={() => setFloatingCamera((v) => !v)}
+        floatingJoints={floatingJoints}
+        onToggleFloatingJoints={() => setFloatingJoints((v) => !v)}
       />
 
       {simuladorVisitado && (
         <div
           className={`absolute inset-0 transition-opacity duration-200 ${
-            activeView === 'vision' ? 'opacity-0 pointer-events-none' : 'opacity-100'
+            activeView !== 'simulador' || snapLayout !== 'single' ? 'opacity-0 pointer-events-none' : 'opacity-100'
           }`}
         >
-          {/* Visor 3D ocupando el 100% de la pantalla */}
           <div className="w-full h-full relative">
             <CanvasViewer
               jointAngles={jointAngles}
@@ -285,7 +366,6 @@ export default function App() {
               customTcpOffset={customTcpOffset}
             />
 
-            {/* Barra inferior flotante */}
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 p-1 rounded-xl bg-[#0b1017]/85 backdrop-blur-xl border border-white/15 shadow-2xl">
               <button
                 onClick={() => setShowEditor((v) => !v)}
@@ -319,6 +399,22 @@ export default function App() {
                   </span>
                 )}
               </button>
+
+              <div className="w-px h-4 bg-white/10" />
+
+              <button
+                onClick={() =>
+                  setActiveCategory((prev) => (prev === 'escena' ? null : 'escena'))
+                }
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                  activeCategory === 'escena'
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-400/40'
+                    : 'text-gray-300 hover:text-white hover:bg-white/10 border border-transparent'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-sky-400" />
+                <span>Geometría Celda</span>
+              </button>
             </div>
           </div>
 
@@ -331,11 +427,13 @@ export default function App() {
               onExpand={(expanded) => {
                 setEditorExpanded(expanded);
               }}
-              onExecuteMovement={async (joints) => {
-                try {
-                  await moveRobot(joints);
-                } catch (err) {
-                  console.error('Error ejecutando movimiento:', err);
+              onExecuteMovement={(joints) => {
+                const pred = geometryService.predecirColision(joints);
+                if (!pred.hayColision) {
+                  lastSafeAnglesRef.current = [...joints];
+                  setJointAngles(joints);
+                } else {
+                  websocketService.abortRapidExecution();
                 }
               }}
               externalCode={rapidCode}
@@ -354,7 +452,6 @@ export default function App() {
             />
           )}
 
-          {/* Dock lateral flotante centrado verticalmente */}
           <ContextualToolPanel
             activeCategory={activeCategory}
             onSelectCategory={setActiveCategory}
@@ -386,18 +483,103 @@ export default function App() {
         </div>
       )}
 
-      <div
-        className={`absolute inset-x-0 top-16 bottom-0 transition-all duration-200 ${
-          activeView === 'vision'
-            ? 'opacity-100 translate-y-0 pointer-events-auto'
-            : 'opacity-0 translate-y-2 pointer-events-none'
-        }`}
-      >
-        <VisionCalibrationPanel
-          isActive={activeView === 'vision'}
-          onClose={() => cambiarVista('simulador')}
+      {activeView === 'vision' && snapLayout === 'single' && (
+        <div className="absolute inset-x-0 top-16 bottom-0 z-30">
+          <VisionCalibrationPanel
+            isActive={true}
+            onClose={() => cambiarVista('simulador')}
+          />
+        </div>
+      )}
+
+      {activeView === 'python-ide' && snapLayout === 'single' && (
+        <div className="absolute inset-x-0 top-16 bottom-0 z-30">
+          <PythonIDEView />
+        </div>
+      )}
+
+      {snapLayout !== 'single' && (
+        <DynamicWorkspace
+          layout={snapLayout}
+          onLayoutChange={setSnapLayout}
+          activeView={activeView}
+          floatingCamera={floatingCamera}
+          onCloseFloatingCamera={() => setFloatingCamera(false)}
+          onOpenFloatingCamera={() => setFloatingCamera(true)}
+          floatingJoints={floatingJoints}
+          onCloseFloatingJoints={() => setFloatingJoints(false)}
+          onOpenFloatingJoints={() => setFloatingJoints(true)}
+          jointAngles={jointAngles}
+          robotInfo={robotInfo}
+          currentPosition={estado?.posicion}
+          singularityAnalysis={singularityAnalysis}
+          connected={connected}
+          onJointChange={handleJointChange}
+          onResetHome={handleReset}
+          showTrajectory={showTrajectory}
+          onTrajectoryToggle={setShowTrajectory}
+          clearTrajectoryTrigger={clearTrajectoryTrigger}
+          showWorkspace={showWorkspace}
+          onWorkspaceToggle={() => setShowWorkspace((v) => !v)}
+          showPivots={showPivots}
+          onPivotsToggle={setShowPivots}
+          customTcpOffset={customTcpOffset}
+          resetCameraTrigger={resetCameraTrigger}
         />
-      </div>
+      )}
+
+      {snapLayout === 'single' && floatingCamera && (
+        <FloatingPanel
+          id="floating-camera-single"
+          title="Cámara & Detección OpenCV (PiP)"
+          icon={<Camera className="w-3.5 h-3.5 text-emerald-400" />}
+          initialPosition={{ x: 24, y: 72 }}
+          width={440}
+          height={320}
+          onClose={() => setFloatingCamera(false)}
+        >
+          <VisionCalibrationPanel isActive={true} compact={true} />
+        </FloatingPanel>
+      )}
+
+      {snapLayout === 'single' && floatingJoints && (
+        <FloatingPanel
+          id="floating-joints-single"
+          title="Control Articular Flotante (q1 - q6)"
+          icon={<Sliders className="w-3.5 h-3.5 text-yellow-400" />}
+          initialPosition={{ x: window.innerWidth - 380, y: 72 }}
+          width={360}
+          height={340}
+          onClose={() => setFloatingJoints(false)}
+        >
+          <div className="p-3 space-y-2 h-full overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-400 uppercase font-semibold">Articulaciones</span>
+              <button
+                onClick={handleReset}
+                className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[10px] text-cyan-300"
+              >
+                Reset Home
+              </button>
+            </div>
+            {jointAngles.slice(0, 6).map((q, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-xs">
+                <span className="w-6 font-mono font-bold text-gray-400 text-[10px]">J{idx + 1}</span>
+                <input
+                  type="range"
+                  min={robotInfo?.limites_articulares?.[idx]?.[0] ?? -180}
+                  max={robotInfo?.limites_articulares?.[idx]?.[1] ?? 180}
+                  step={0.5}
+                  value={q}
+                  onChange={(e) => handleJointChange(idx, parseFloat(e.target.value))}
+                  className="flex-1 accent-cyan-400 cursor-pointer h-1.5 bg-white/10 rounded-lg"
+                />
+                <span className="w-10 text-right font-mono text-[10px] text-white">{q.toFixed(1)}°</span>
+              </div>
+            ))}
+          </div>
+        </FloatingPanel>
+      )}
     </div>
   );
 }

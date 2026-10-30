@@ -1,4 +1,5 @@
-import { Terminal, X, GripVertical, Maximize2, Minimize2, Play, Save, FileCode, Loader2, Square, Upload, Trash2 } from 'lucide-react';
+import { Terminal, X, GripVertical, Maximize2, Minimize2, Play, Save, FileCode, Loader2, Square, Upload, Trash2, AlertTriangle } from 'lucide-react';
+import geometryService from '../../services/geometryService';
 import { useState, useRef, useEffect } from 'react';
 import { useDraggable } from '../hooks/useDraggable';
 import Editor, { Monaco } from '@monaco-editor/react';
@@ -49,7 +50,21 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
   const [isExecuting, setIsExecuting] = useState(false);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
-  const [useWebSocket, setUseWebSocket] = useState(true); // Preferir WebSocket
+  const [useWebSocket, setUseWebSocket] = useState(true);
+  const [alertaColision, setAlertaColision] = useState<any>(null);
+
+  useEffect(() => {
+    const unsubAlerta = geometryService.suscribirAlerta((alerta) => {
+      if (alerta?.activa) {
+        setIsExecuting(false);
+      }
+    });
+    return unsubAlerta;
+  }, []);
+
+  useEffect(() => {
+    return geometryService.suscribirAlerta((al) => setAlertaColision(al));
+  }, []);
   const editorRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -201,7 +216,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
   };
 
   const handleRun = async () => {
-
+    geometryService.reiniciarCicloAlerta();
     setMovements([]);
     setCurrentStep(0);
     setIsExecuting(true);
@@ -242,7 +257,33 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
         }
 
         if (point.joints && onExecuteMovement) {
+          const coords = point.position
+            ? ([point.position.x, point.position.y, point.position.z] as [number, number, number])
+            : undefined;
+          const pred = geometryService.predecirColision(point.joints, coords);
+          if (pred.hayColision) {
+            websocketService.abortRapidExecution();
+            setIsExecuting(false);
+            geometryService.dispararAlerta({
+              activa: true,
+              tipo: 'predictiva',
+              titulo: 'PARADA PREDICTIVA DE SEGURIDAD',
+              mensaje: 'Riesgo inminente de colisión',
+              detalle: pred.detalle || `Posible colisión de ${pred.link} con "${pred.obstaculo}".`,
+              obstaculo: pred.obstaculo || 'Obstáculo en celda',
+              link: pred.link || 'Manipulador',
+              timestamp: Date.now(),
+            });
+            addOutput(`> 🛑 [SEGURIDAD PREDICTIVA] Ejecución RAPID detenida antes de impactar con ${pred.obstaculo}`);
+            addOutput(`> ⚠️ ${pred.detalle}`);
+            return;
+          }
+
           onExecuteMovement(point.joints);
+
+          if (pred.esAgarreValido && pred.detalle) {
+            addOutput(`> 🧲 [AGARRE] ${pred.detalle}`);
+          }
 
           if (!point.is_intermediate && point.position) {
             addOutput(`  → Posición: [${point.position.x.toFixed(1)}, ${point.position.y.toFixed(1)}, ${point.position.z.toFixed(1)}]mm`);
@@ -351,7 +392,32 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       }
 
       if (movement.joints && onExecuteMovement) {
+        const coords = movement.position
+          ? ([movement.position.x, movement.position.y, movement.position.z] as [number, number, number])
+          : undefined;
+        const pred = geometryService.predecirColision(movement.joints, coords);
+        if (pred.hayColision) {
+          setIsExecuting(false);
+          geometryService.dispararAlerta({
+            activa: true,
+            tipo: 'predictiva',
+            titulo: 'PARADA PREDICTIVA DE SEGURIDAD',
+            mensaje: 'Riesgo inminente de colisión',
+            detalle: pred.detalle || `Posible colisión de ${pred.link} con "${pred.obstaculo}".`,
+            obstaculo: pred.obstaculo || 'Obstáculo en celda',
+            link: pred.link || 'Manipulador',
+            timestamp: Date.now(),
+          });
+          addOutput(`> 🛑 [SEGURIDAD PREDICTIVA] Ejecución RAPID detenida antes de impactar con ${pred.obstaculo}`);
+          addOutput(`> ⚠️ ${pred.detalle}`);
+          break;
+        }
+
         onExecuteMovement(movement.joints);
+
+        if (pred.esAgarreValido && pred.detalle) {
+          addOutput(`> 🧲 [AGARRE] ${pred.detalle}`);
+        }
 
         if (movement.position) {
           addOutput(`  → Posición: [${movement.position.x.toFixed(1)}, ${movement.position.y.toFixed(1)}, ${movement.position.z.toFixed(1)}]mm`);
@@ -385,7 +451,32 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       }
 
       if (point.joints && onExecuteMovement) {
+        const coords = point.position
+          ? ([point.position.x, point.position.y, point.position.z] as [number, number, number])
+          : undefined;
+        const pred = geometryService.predecirColision(point.joints, coords);
+        if (pred.hayColision) {
+          setIsExecuting(false);
+          geometryService.dispararAlerta({
+            activa: true,
+            tipo: 'predictiva',
+            titulo: 'PARADA PREDICTIVA DE SEGURIDAD',
+            mensaje: 'Riesgo inminente de colisión',
+            detalle: pred.detalle || `Posible colisión de ${pred.link} con "${pred.obstaculo}".`,
+            obstaculo: pred.obstaculo || 'Obstáculo en celda',
+            link: pred.link || 'Manipulador',
+            timestamp: Date.now(),
+          });
+          addOutput(`> 🛑 [SEGURIDAD PREDICTIVA] Ejecución RAPID detenida antes de impactar con ${pred.obstaculo}`);
+          addOutput(`> ⚠️ ${pred.detalle}`);
+          break;
+        }
+
         onExecuteMovement(point.joints);
+
+        if (pred.esAgarreValido && pred.detalle) {
+          addOutput(`> 🧲 [AGARRE] ${pred.detalle}`);
+        }
 
         if (!point.is_intermediate && point.position) {
           addOutput(`  → Posición: [${point.position.x.toFixed(1)}, ${point.position.y.toFixed(1)}, ${point.position.z.toFixed(1)}]mm`);
@@ -474,7 +565,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
     const robotId = robotType ? ROBOT_ID_MAP[robotType] ?? 'ABB_IRB_140' : 'ABB_IRB_140';
     const folderName = robotId === 'ABB_IRB_140' ? 'IRB_140' : 'IRB_910SC';
     try {
-      addOutput(`> Descargando proyecto RobotStudio para ${robotType ?? 'robot'}...`);
+      addOutput(`> Descargando paquete RAPID para ${robotType ?? 'robot'}...`);
       const response = await axios.post(
         `http://127.0.0.1:5000/api/rapid/download/${robotId}`,
         { code },
@@ -483,7 +574,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/zip' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `RobotStudio_${folderName}.zip`;
+      link.download = `RAPID_${folderName}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -574,7 +665,7 @@ export function RapidEditor({ onClose, onExpand, onExecuteMovement, externalCode
           <button
             onClick={handleDownload}
             className="text-gray-400 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded flex items-center gap-1.5 text-xs"
-            title="Descargar proyecto RobotStudio"
+            title="Descargar paquete RAPID"
           >
             <Save className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Descargar</span>

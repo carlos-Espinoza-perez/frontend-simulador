@@ -31,6 +31,8 @@ import {
   SelectValue,
 } from './ui/select';
 import type { SavedPoint } from './PathRecorder';
+import { CellGeometryPanel } from './CellGeometryPanel';
+import geometryService from '../../services/geometryService';
 
 export type ContextualCategory =
   | 'movimiento'
@@ -52,7 +54,6 @@ interface ContextualToolPanelProps {
   singularityAnalysis?: any;
   robotInfo?: any;
   connected: boolean;
-  // Controles de escena y trayectoria 3D
   showTrajectory: boolean;
   onTrajectoryToggle: (show: boolean) => void;
   onClearTrajectory: () => void;
@@ -62,7 +63,6 @@ interface ContextualToolPanelProps {
   onPivotsToggle: (show: boolean) => void;
   customTcpOffset: [number, number, number];
   onTcpOffsetChange: (offset: [number, number, number]) => void;
-  // Grabador de trayectoria
   savedPoints: SavedPoint[];
   onSavedPointsChange: (points: SavedPoint[]) => void;
   onExecutePath: (points: SavedPoint[], interpolationSteps?: number, stepDelay?: number) => Promise<void>;
@@ -228,10 +228,8 @@ export function ContextualToolPanel({
 
   return (
     <aside className="fixed right-4 top-1/2 -translate-y-1/2 z-30 flex items-center gap-2.5 select-none pointer-events-none">
-      {/* Panel desplegable contextual flotante */}
       {activeCategory && (
         <div className="pointer-events-auto w-[360px] sm:w-[380px] max-h-[calc(100vh-120px)] rounded-2xl bg-[#0b1017]/90 backdrop-blur-xl border border-white/15 flex flex-col shadow-2xl overflow-hidden">
-          {/* Cabecera del panel contextual */}
           <div className="px-4 py-3 border-b border-white/10 bg-black/40 flex items-center justify-between">
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-wider text-cyan-400 truncate">
@@ -250,9 +248,7 @@ export function ContextualToolPanel({
             </button>
           </div>
 
-          {/* Contenido del grupo activo */}
           <div className="flex-1 overflow-y-auto p-4 pr-3.5 space-y-5">
-            {/* 1. MOVIMIENTO: Jog de ejes, coordenadas cartesianas, velocidad y orientación */}
             {activeCategory === 'movimiento' && (
               <>
                 <div className="space-y-2">
@@ -283,7 +279,6 @@ export function ContextualToolPanel({
                   </Select>
                 </div>
 
-                {/* Coordenadas Cartesianas actuales */}
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">
@@ -307,7 +302,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Paso/Velocidad de Jog y Articulaciones */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
@@ -378,7 +372,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Orientación del Efector (Cuaterniones + Triedro) */}
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
@@ -421,7 +414,6 @@ export function ContextualToolPanel({
               </>
             )}
 
-            {/* 2. TRAYECTORIA: Grabar, reproducir, pausar, limpiar y trazo 3D */}
             {activeCategory === 'trayectoria' && (
               <>
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-2.5">
@@ -450,7 +442,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Captura de puntos */}
                 <div className="space-y-2.5">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Grabar Punto Actual
@@ -471,12 +462,19 @@ export function ContextualToolPanel({
                       <span>Guardar</span>
                     </button>
                   </div>
-                  <div className="text-[10px] text-gray-400 font-mono bg-black/30 px-2.5 py-1.5 rounded border border-white/5">
-                    Actual: X={x.toFixed(1)}, Y={y.toFixed(1)}, Z={z.toFixed(1)} mm
+                  <div className="text-[10px] text-gray-400 font-mono bg-black/30 px-2.5 py-1.5 rounded border border-white/5 space-y-0.5">
+                    <div>TCP Base: [{x.toFixed(1)}, {y.toFixed(1)}, {z.toFixed(1)}] mm</div>
+                    {(() => {
+                      const [wx, wy, wz] = geometryService.transformarBaseAMundo([x, y, z]);
+                      const base = geometryService.obtenerBase();
+                      if (base.x !== 0 || base.y !== 0 || base.z !== 0 || base.rz !== 0) {
+                        return <div className="text-cyan-300">TCP Mundo: [{wx.toFixed(1)}, {wy.toFixed(1)}, {wz.toFixed(1)}] mm</div>;
+                      }
+                      return null;
+                    })()}
                   </div>
                 </div>
 
-                {/* Lista de puntos */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
@@ -525,7 +523,6 @@ export function ContextualToolPanel({
                   )}
                 </div>
 
-                {/* Parámetros de interpolación y reproducción */}
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-3">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Interpolación y Ejecución
@@ -583,10 +580,11 @@ export function ContextualToolPanel({
               </>
             )}
 
-            {/* 3. ESPACIO DE TRABAJO / ESCENA: Límites, mesa, objetos y zonas */}
             {activeCategory === 'escena' && (
               <>
-                <div className="space-y-2.5">
+                <CellGeometryPanel />
+
+                <div className="space-y-2.5 pt-2 border-t border-white/10">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Capas Visuales del Espacio 3D
                   </div>
@@ -638,7 +636,6 @@ export function ContextualToolPanel({
                   </button>
                 </div>
 
-                {/* Especificaciones de alcance y límites */}
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-2.5">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Envolvente y Límites Mecánicos
@@ -659,7 +656,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Mesa de trabajo y zonas de clasificación */}
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-2.5">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Mesa y Zonas de Clasificación
@@ -680,10 +676,8 @@ export function ContextualToolPanel({
               </>
             )}
 
-            {/* 4. HERRAMIENTAS Y CINEMÁTICA: TCP, efector final y Denavit-Hartenberg */}
             {activeCategory === 'herramientas' && (
               <>
-                {/* TCP y Efector Final */}
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
@@ -723,7 +717,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Tabla Denavit-Hartenberg */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
@@ -773,7 +766,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Índices del Jacobiano / Singularidades */}
                 {singularityAnalysis && (
                   <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-2">
                     <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
@@ -798,7 +790,6 @@ export function ContextualToolPanel({
               </>
             )}
 
-            {/* 5. ESTADO Y TELEMETRÍA: Posición actual, configuración de ejes y conexión */}
             {activeCategory === 'estado' && (
               <>
                 <div className="bg-black/30 rounded-lg p-3 border border-white/10 space-y-2">
@@ -834,7 +825,6 @@ export function ContextualToolPanel({
                   )}
                 </div>
 
-                {/* Posición TCP */}
                 <div className="space-y-2">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Posición Cartesiana Actual (TCP)
@@ -855,7 +845,6 @@ export function ContextualToolPanel({
                   </div>
                 </div>
 
-                {/* Configuración y carga de rango de ejes */}
                 <div className="space-y-2.5">
                   <div className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
                     Configuración y Rango de Ejes
@@ -901,7 +890,6 @@ export function ContextualToolPanel({
         </div>
       )}
 
-      {/* Dock vertical flotante centrado con las 5 categorías */}
       <div className="pointer-events-auto p-1.5 rounded-2xl bg-[#0b1017]/85 backdrop-blur-xl border border-white/15 shadow-2xl flex flex-col items-center gap-1.5">
         {CATEGORIES.map((cat) => {
           const Icon = cat.icon;

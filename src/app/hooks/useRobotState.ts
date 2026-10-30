@@ -30,7 +30,6 @@ export function useRobotState() {
       }
     },
     onActualizacion: (nuevoEstado) => {
-      console.log('Actualización del robot:', nuevoEstado);
       setEstado(nuevoEstado);
     },
     onRobotCambiado: async (data) => {

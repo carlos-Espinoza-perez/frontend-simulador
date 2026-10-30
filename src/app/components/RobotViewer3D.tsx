@@ -1,19 +1,23 @@
 import { useRef, useEffect, useState, Suspense, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, Line } from '@react-three/drei';
-import { Maximize2, Minimize2, RotateCcw, Keyboard } from 'lucide-react';
+import { OrbitControls, Grid, Line, TransformControls } from '@react-three/drei';
+import { Maximize2, Minimize2, RotateCcw, Keyboard, Move, RotateCw, AlertTriangle, X } from 'lucide-react';
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import api from '../../services/api';
+import { CellGeometries } from './CellGeometries';
+import { CellDistanceDimension3D, CellDistanceHUD } from './CellDistanceIndicator';
+import geometryService, { RobotBasePose, ColisionActiva } from '../../services/geometryService';
 
 interface STLModelProps {
   url: string;
   color?: string;
   scale?: number;
   position?: THREE.Vector3;
+  isColliding?: boolean;
 }
 
-function STLModel({ url, color = '#E8E8E8', scale = 1, position }: STLModelProps) {
+function STLModel({ url, color = '#E8E8E8', scale = 1, position, isColliding }: STLModelProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [error, setError] = useState<boolean>(false);
@@ -56,7 +60,9 @@ function STLModel({ url, color = '#E8E8E8', scale = 1, position }: STLModelProps
       position={position}
     >
       <meshStandardMaterial
-        color={color}
+        color={isColliding ? '#ef4444' : color}
+        emissive={isColliding ? '#b91c1c' : '#000000'}
+        emissiveIntensity={isColliding ? 0.7 : 0}
         metalness={0.7}
         roughness={0.3}
         envMapIntensity={1}
@@ -175,7 +181,30 @@ const AXES_HOME = [
   new THREE.Vector3(1, 0, 0)
 ];
 
-function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPositions, customTcpOffset }: RobotViewerProps) {
+interface RobotExtendedProps extends RobotViewerProps {
+  basePose: RobotBasePose;
+  selectedId: string | 'robot_base' | null;
+  transformMode: 'translate' | 'rotate';
+  collidingLinks: Set<number>;
+  linkRefs?: React.MutableRefObject<(THREE.Group | null)[]>;
+  robotBaseRef?: React.MutableRefObject<THREE.Group | null>;
+}
+
+function Robot({
+  jointAngles,
+  robotInfo,
+  showTrajectory,
+  customPivots,
+  customPositions,
+  customTcpOffset,
+  basePose,
+  selectedId,
+  collidingLinks,
+  linkRefs,
+  robotBaseRef,
+}: RobotExtendedProps) {
+  const localBaseRef = useRef<THREE.Group>(null);
+  const isBaseSelected = selectedId === 'robot_base';
   const groupRefs = useRef<(THREE.Group | null)[]>([]);
   const trajectoryPoints = useRef<THREE.Vector3[]>([]);
   const lastTcpPosition = useRef<THREE.Vector3 | null>(null);
@@ -304,34 +333,57 @@ function Robot({ jointAngles, robotInfo, showTrajectory, customPivots, customPos
 
   return (
     <group rotation={initRot} position={initPos}>
-      {eslabones.map((eslabon, index) => {
-        const localPosArray = customPositions?.[index] || eslabon.posicion_local || [0, 0, 0];
-        const localPos = new THREE.Vector3(localPosArray[0], localPosArray[1], localPosArray[2]);
-        return (
-          <group
-            key={eslabon.id}
-            ref={(el: THREE.Group | null) => { groupRefs.current[index] = el; }}
-          >
-            <STLModel
-              url={`/models/${robotFolder}/${eslabon.archivo_stl}`}
-              color={eslabon.color}
-              scale={scale}
-              position={localPos}
-            />
-          </group>
-        );
-      })}
+      <group
+        ref={(el) => {
+          localBaseRef.current = el;
+          if (robotBaseRef) robotBaseRef.current = el;
+        }}
+        position={[basePose.x / 1000, basePose.y / 1000, basePose.z / 1000]}
+        rotation={[0, 0, (basePose.rz * Math.PI) / 180]}
+        onClick={(e) => {
+          e.stopPropagation();
+          geometryService.seleccionar('robot_base');
+        }}
+      >
+        {isBaseSelected && (
+          <mesh position={[DX + 0.07, DY, 0.002]}>
+            <ringGeometry args={[0.16, 0.18, 32]} />
+            <meshBasicMaterial color="#f59e0b" transparent opacity={0.85} />
+          </mesh>
+        )}
 
-      {}
-      <TrajectoryLine
-        showTrajectory={showTrajectory}
-        trajectoryPointsRef={trajectoryPoints}
-      />
+        {eslabones.map((eslabon, index) => {
+          const localPosArray = customPositions?.[index] || eslabon.posicion_local || [0, 0, 0];
+          const localPos = new THREE.Vector3(localPosArray[0], localPosArray[1], localPosArray[2]);
+          return (
+            <group
+              key={eslabon.id}
+              ref={(el: THREE.Group | null) => {
+                groupRefs.current[index] = el;
+                if (linkRefs) linkRefs.current[index] = el;
+              }}
+            >
+              <STLModel
+                url={`/models/${robotFolder}/${eslabon.archivo_stl}`}
+                color={eslabon.color}
+                scale={scale}
+                position={localPos}
+                isColliding={collidingLinks.has(index)}
+              />
+            </group>
+          );
+        })}
+
+        <TrajectoryLine
+          showTrajectory={showTrajectory}
+          trajectoryPointsRef={trajectoryPoints}
+        />
+      </group>
     </group>
   );
 }
 
-function WorkspaceCloud({ points, initPos, initRot, isIRB140 }: { points: number[][], initPos: [number, number, number], initRot: [number, number, number], isIRB140: boolean }) {
+function WorkspaceCloud({ points, initPos, initRot, isIRB140, basePose }: { points: number[][], initPos: [number, number, number], initRot: [number, number, number], isIRB140: boolean, basePose?: RobotBasePose }) {
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
     if (points.length > 0) {
@@ -348,7 +400,12 @@ function WorkspaceCloud({ points, initPos, initRot, isIRB140 }: { points: number
   }, [points, isIRB140]);
 
   return (
-    <points rotation={initRot} position={initPos} geometry={geometry}>
+    <group rotation={initRot} position={initPos}>
+      <points
+        position={basePose ? [basePose.x / 1000, basePose.y / 1000, basePose.z / 1000] : [0, 0, 0]}
+        rotation={basePose ? [0, 0, (basePose.rz * Math.PI) / 180] : [0, 0, 0]}
+        geometry={geometry}
+      >
       <pointsMaterial
         size={0.008}
         color="#00ffff"
@@ -358,6 +415,7 @@ function WorkspaceCloud({ points, initPos, initRot, isIRB140 }: { points: number
         depthWrite={false}
       />
     </points>
+    </group>
   );
 }
 
@@ -388,6 +446,158 @@ function CameraResetEffect({
   }, [resetCameraTrigger, cameraPosition[0], cameraPosition[1], cameraPosition[2], DEFAULT_ORBIT_TARGET[1]]);
 
   return null;
+}
+
+function GizmoManager({
+  controlsRef,
+}: {
+  controlsRef: React.MutableRefObject<any>;
+}) {
+  const transformRef = useRef<any>(null);
+  const proxyRef = useRef<THREE.Group>(null);
+  const [selectedId, setSelectedId] = useState<string | 'robot_base' | null>(() =>
+    geometryService.getSeleccionado()
+  );
+  const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'none'>(() =>
+    geometryService.getModo()
+  );
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    const unsubSel = geometryService.suscribirSeleccion(setSelectedId);
+    const unsubModo = geometryService.suscribirModo(setTransformMode);
+    return () => {
+      unsubSel();
+      unsubModo();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!proxyRef.current || !selectedId) return;
+
+    const syncProxy = () => {
+      if (isDraggingRef.current) return;
+      if (selectedId === 'robot_base') {
+        const base = geometryService.obtenerBase();
+        proxyRef.current?.position.set(
+          0.070 + base.x / 1000,
+          base.z / 1000,
+          -base.y / 1000
+        );
+        proxyRef.current?.rotation.set(0, (-base.rz * Math.PI) / 180, 0);
+      } else {
+        const all = geometryService.obtenerTodas();
+        const item = all.find((g) => g.id === selectedId);
+        if (item && proxyRef.current) {
+          const heightOffset = item.tipo === 'table' ? item.dimensiones[2] / 1000 : 0;
+          proxyRef.current.position.set(
+            0.070 + item.posicion[0] / 1000,
+            item.posicion[2] / 1000 + heightOffset,
+            -item.posicion[1] / 1000
+          );
+          proxyRef.current.rotation.set(
+            (item.rotacion[0] * Math.PI) / 180,
+            (-item.rotacion[2] * Math.PI) / 180,
+            (item.rotacion[1] * Math.PI) / 180
+          );
+        }
+      }
+    };
+
+    syncProxy();
+    const unsubG = geometryService.suscribir(syncProxy);
+    const unsubB = geometryService.suscribirBase(syncProxy);
+    return () => {
+      unsubG();
+      unsubB();
+    };
+  }, [selectedId]);
+
+  useEffect(() => {
+    const tc = transformRef.current;
+    if (!tc) return;
+
+    const onDragChange = (e: any) => {
+      isDraggingRef.current = e.value;
+      if (controlsRef.current) {
+        controlsRef.current.enabled = !e.value;
+      }
+      geometryService.setDragging(e.value);
+    };
+
+    const onObjectChange = () => {
+      if (!proxyRef.current || !selectedId) return;
+      const p = proxyRef.current.position;
+      const r = proxyRef.current.rotation;
+
+      const all = geometryService.obtenerTodas();
+      const item = all.find((g) => g.id === selectedId);
+      const heightOffset = item && item.tipo === 'table' ? item.dimensiones[2] / 1000 : 0;
+
+      const posX = Math.round((p.x - 0.070) * 1000);
+      const posY = Math.round(-p.z * 1000);
+      const posZ = Math.round((p.y - heightOffset) * 1000);
+      const rotZ = Math.round((-r.y * 180) / Math.PI);
+
+      if (selectedId === 'robot_base') {
+        geometryService.actualizarBase({
+          x: posX,
+          y: posY,
+          z: posZ,
+          rz: rotZ,
+        });
+      } else {
+        geometryService.actualizar(selectedId, {
+          posicion: [posX, posY, posZ],
+          rotacion: [
+            Math.round((r.x * 180) / Math.PI),
+            Math.round((r.z * 180) / Math.PI),
+            rotZ,
+          ],
+        });
+      }
+    };
+
+    tc.addEventListener('dragging-changed', onDragChange);
+    tc.addEventListener('objectChange', onObjectChange);
+
+    return () => {
+      tc.removeEventListener('dragging-changed', onDragChange);
+      tc.removeEventListener('objectChange', onObjectChange);
+    };
+  }, [selectedId, controlsRef]);
+
+  useEffect(() => {
+    const onWindowPointerUp = () => {
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        geometryService.setDragging(false);
+      }
+      if (controlsRef.current && !controlsRef.current.enabled) {
+        controlsRef.current.enabled = true;
+      }
+    };
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('mouseup', onWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('mouseup', onWindowPointerUp);
+    };
+  }, [controlsRef]);
+
+  if (!selectedId || transformMode === 'none') return null;
+
+  return (
+    <>
+      <group ref={proxyRef} />
+      <TransformControls
+        ref={transformRef}
+        object={proxyRef}
+        mode={transformMode}
+        size={0.7}
+      />
+    </>
+  );
 }
 
 function Scene({
@@ -424,6 +634,80 @@ function Scene({
   const controlsRef = useRef<any>(null);
   const monacoFocusedRef = useRef(false);
 
+  const linkRefs = useRef<(THREE.Group | null)[]>([]);
+  const robotBaseRef = useRef<THREE.Group | null>(null);
+  const geomRefs = useRef<Map<string, THREE.Group>>(new Map());
+  const [colisiones, setColisiones] = useState<ColisionActiva[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [basePose, setBasePose] = useState<RobotBasePose>(() => geometryService.obtenerBase());
+  const [selectedId, setSelectedId] = useState<string | 'robot_base' | null>(() =>
+    geometryService.getSeleccionado()
+  );
+  const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'none'>(() =>
+    geometryService.getModo()
+  );
+
+  useEffect(() => {
+    const unsubBase = geometryService.suscribirBase(setBasePose);
+    const unsubDrag = geometryService.suscribirDrag(setIsDragging);
+    const unsubCol = geometryService.suscribirColisiones(setColisiones);
+    const unsubSel = geometryService.suscribirSeleccion(setSelectedId);
+    const unsubModo = geometryService.suscribirModo(setTransformMode);
+
+    return () => {
+      unsubBase();
+      unsubDrag();
+      unsubCol();
+      unsubSel();
+      unsubModo();
+    };
+  }, []);
+
+  const collidingLinks = useMemo(
+    () => new Set(colisiones.map((c) => c.linkIndex)),
+    [colisiones]
+  );
+
+  useFrame(() => {
+    if (linkRefs.current.length === 0 || geomRefs.current.size === 0) {
+      if (colisiones.length > 0) geometryService.actualizarColisiones([]);
+      return;
+    }
+
+    const activeCols: ColisionActiva[] = [];
+    const geoms = geometryService.obtenerTodas().filter((g) => g.visible);
+
+    const linkBoxes: { index: number; name: string; box: THREE.Box3 }[] = [];
+    for (let i = 1; i < linkRefs.current.length; i++) {
+      const grp = linkRefs.current[i];
+      if (grp) {
+        const box = new THREE.Box3().setFromObject(grp);
+        box.expandByScalar(-0.008);
+        linkBoxes.push({ index: i, name: `Link ${i}`, box });
+      }
+    }
+
+    geomRefs.current.forEach((el, id) => {
+      const item = geoms.find((g) => g.id === id);
+      if (!item || item.esBaseRobot) return;
+      const geomBox = new THREE.Box3().setFromObject(el);
+      geomBox.expandByScalar(-0.008);
+
+      for (const lb of linkBoxes) {
+        if (lb.box.intersectsBox(geomBox)) {
+          activeCols.push({
+            linkIndex: lb.index,
+            linkNombre: lb.name,
+            geomId: item.id,
+            geomNombre: item.nombre,
+          });
+        }
+      }
+    });
+
+    geometryService.actualizarColisiones(activeCols);
+  });
+
   useEffect(() => {
     const handler = (e: Event) => { monacoFocusedRef.current = (e as CustomEvent).detail as boolean; };
     window.addEventListener('monacoFocus', handler);
@@ -453,6 +737,66 @@ function Scene({
         return;
       }
 
+      if (selectedId) {
+        const step = e.shiftKey ? 50 : e.altKey ? 2 : 10;
+        const angleStep = e.shiftKey ? 45 : e.altKey ? 5 : 15;
+
+        if (e.key === 'Escape') {
+          geometryService.seleccionar(null);
+          return;
+        }
+
+        let dx = 0;
+        let dy = 0;
+        let dz = 0;
+        let drz = 0;
+
+        if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+          dx = step;
+          e.preventDefault();
+        } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+          dx = -step;
+          e.preventDefault();
+        } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+          dy = step;
+          e.preventDefault();
+        } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+          dy = -step;
+          e.preventDefault();
+        } else if (e.key === 'PageUp' || e.key === 'q' || e.key === 'Q') {
+          dz = step;
+          e.preventDefault();
+        } else if (e.key === 'PageDown' || (e.key === 'e' && selectedId)) {
+          dz = -step;
+          e.preventDefault();
+        } else if (e.key === 'r' || e.key === 'R') {
+          drz = angleStep;
+          e.preventDefault();
+        }
+
+        if (dx !== 0 || dy !== 0 || dz !== 0 || drz !== 0) {
+          if (selectedId === 'robot_base') {
+            const current = geometryService.obtenerBase();
+            geometryService.actualizarBase({
+              x: current.x + dx,
+              y: current.y + dy,
+              z: current.z + dz,
+              rz: current.rz + drz,
+            });
+          } else {
+            const all = geometryService.obtenerTodas();
+            const it = all.find((g) => g.id === selectedId);
+            if (it) {
+              geometryService.actualizar(selectedId, {
+                posicion: [it.posicion[0] + dx, it.posicion[1] + dy, it.posicion[2] + dz],
+                rotacion: [it.rotacion[0], it.rotacion[1], (it.rotacion[2] + drz) % 360],
+              });
+            }
+          }
+          return;
+        }
+      }
+
       if ((e.key === 'p' || e.key === 'P') && onPivotsToggle) {
         onPivotsToggle(!showPivots);
       }
@@ -466,9 +810,39 @@ function Scene({
         onWorkspaceToggle();
       }
     };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!selectedId || (!e.altKey && !e.ctrlKey)) return;
+      e.preventDefault();
+      const delta = Math.sign(e.deltaY) * -5;
+      if (e.altKey) {
+        if (selectedId === 'robot_base') {
+          const b = geometryService.obtenerBase();
+          geometryService.actualizarBase({ z: b.z + delta });
+        } else {
+          const all = geometryService.obtenerTodas();
+          const it = all.find((g) => g.id === selectedId);
+          if (it) geometryService.actualizar(selectedId, { posicion: [it.posicion[0], it.posicion[1], it.posicion[2] + delta] });
+        }
+      } else if (e.ctrlKey) {
+        if (selectedId === 'robot_base') {
+          const b = geometryService.obtenerBase();
+          geometryService.actualizarBase({ x: b.x + delta });
+        } else {
+          const all = geometryService.obtenerTodas();
+          const it = all.find((g) => g.id === selectedId);
+          if (it) geometryService.actualizar(selectedId, { posicion: [it.posicion[0] + delta, it.posicion[1], it.posicion[2]] });
+        }
+      }
+    };
+
     window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [showTrajectory, showPivots, onPivotsToggle, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle]);
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+      window.removeEventListener('wheel', handleWheel);
+    };
+  }, [showTrajectory, showPivots, onPivotsToggle, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle, selectedId]);
 
   return (
     <>
@@ -533,8 +907,15 @@ function Scene({
       ))}
 
       {showWorkspace && workspacePoints.length > 0 && (
-        <WorkspaceCloud points={workspacePoints} initPos={initPos} initRot={initRot} isIRB140={isIRB140} />
+        <WorkspaceCloud points={workspacePoints} initPos={initPos} initRot={initRot} isIRB140={isIRB140} basePose={basePose} />
       )}
+
+      <CellGeometries
+        geomRefs={geomRefs}
+        colisiones={colisiones}
+      />
+
+      <CellDistanceDimension3D />
 
       <Suspense fallback={null}>
         <Robot
@@ -546,8 +927,16 @@ function Scene({
           customPivots={customPivots}
           customPositions={customPositions}
           customTcpOffset={customTcpOffset}
+          basePose={basePose}
+          selectedId={selectedId}
+          transformMode={transformMode}
+          collidingLinks={collidingLinks}
+          linkRefs={linkRefs}
+          robotBaseRef={robotBaseRef}
         />
       </Suspense>
+
+      <GizmoManager controlsRef={controlsRef} />
 
       <OrbitControls
         ref={controlsRef}
@@ -559,6 +948,94 @@ function Scene({
         target={DEFAULT_ORBIT_TARGET}
       />
     </>
+  );
+}
+
+function CollisionOverlay() {
+  const [colisiones, setColisiones] = useState<ColisionActiva[]>([]);
+
+  useEffect(() => {
+    return geometryService.suscribirColisiones(setColisiones);
+  }, []);
+
+  if (colisiones.length === 0) return null;
+
+  return (
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+      <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-red-950/90 border border-red-500/70 shadow-2xl backdrop-blur-md animate-pulse">
+        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+        <div className="text-xs font-semibold text-red-100">
+          ¡Colisión detectada: {colisiones[0].linkNombre} con "{colisiones[0].geomNombre}"!
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GizmoQuickToolbar() {
+  const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'none'>(() => geometryService.getModo());
+  const [selectedId, setSelectedId] = useState<string | 'robot_base' | null>(() => geometryService.getSeleccionado());
+
+  useEffect(() => {
+    const unsubModo = geometryService.suscribirModo(setTransformMode);
+    const unsubSel = geometryService.suscribirSeleccion(setSelectedId);
+    return () => {
+      unsubModo();
+      unsubSel();
+    };
+  }, []);
+
+  const toggleModo = (modo: 'translate' | 'rotate') => {
+    if (transformMode === modo) {
+      geometryService.setModo('none');
+    } else {
+      geometryService.setModo(modo);
+    }
+  };
+
+  return (
+    <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 p-1 rounded-xl bg-[#0b1017]/85 backdrop-blur-xl border border-white/10 shadow-xl">
+      <button
+        onClick={() => toggleModo('translate')}
+        className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all ${
+          transformMode === 'translate'
+            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
+            : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+        }`}
+        title={transformMode === 'translate' ? 'Desactivar Mover (clic para desmarcar)' : 'Activar Mover (W)'}
+      >
+        <Move className="w-3.5 h-3.5" />
+        <span>Mover</span>
+      </button>
+      <button
+        onClick={() => toggleModo('rotate')}
+        className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all ${
+          transformMode === 'rotate'
+            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
+            : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+        }`}
+        title={transformMode === 'rotate' ? 'Desactivar Rotar (clic para desmarcar)' : 'Activar Rotar (E)'}
+      >
+        <RotateCw className="w-3.5 h-3.5" />
+        <span>Rotar</span>
+      </button>
+
+      {selectedId && (
+        <>
+          <div className="w-px h-3.5 bg-white/10" />
+          <button
+            onClick={() => geometryService.seleccionar(null)}
+            className="px-2 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/10 flex items-center gap-1"
+            title="Deseleccionar (Esc)"
+          >
+            <X className="w-3 h-3" />
+            <span className="truncate max-w-[100px]">
+              {selectedId === 'robot_base' ? 'Base Robot' : 'Objeto'}
+            </span>
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -736,7 +1213,10 @@ export function RobotViewer3D({
         />
       </Canvas>
 
-      {/* Indicadores discretos de capas activas */}
+      <GizmoQuickToolbar />
+      <CollisionOverlay />
+      <CellDistanceHUD />
+
       {(showTrajectory || showWorkspace || showPivots || isLoadingWorkspace) && (
         <div className="absolute top-16 left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/55 border border-white/10 backdrop-blur-md text-[10px]">
           {showTrajectory && (
@@ -760,7 +1240,6 @@ export function RobotViewer3D({
         </div>
       )}
 
-      {/* Leyenda discreta de ejes + atajos plegables en esquina inferior izquierda */}
       {!isCalibrating && (
         <div className="absolute bottom-3 left-3 z-20 flex items-end gap-2 select-none">
           <div className="bg-black/55 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-white/10 flex items-center gap-3 text-[10px] text-gray-400 shadow-lg">
@@ -810,6 +1289,29 @@ export function RobotViewer3D({
                 <div className="flex justify-between">
                   <kbd className="text-white font-mono">E</kbd>
                   <span className="text-gray-400">Espacio trabajo</span>
+                </div>
+                <div className="font-semibold text-sky-400 uppercase tracking-wider border-b border-white/10 pb-1 mt-2 mb-1">
+                  Mover Pieza
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">Flechas / WASD</kbd>
+                  <span className="text-gray-400">X / Y</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">Q / E / AvPág</kbd>
+                  <span className="text-gray-400">Altura Z</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">R</kbd>
+                  <span className="text-gray-400">Girar Yaw</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">Shift / Alt</kbd>
+                  <span className="text-gray-400">Rápido / Fino</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">Esc</kbd>
+                  <span className="text-gray-400">Deseleccionar</span>
                 </div>
               </div>
             )}

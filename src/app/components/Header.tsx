@@ -1,20 +1,34 @@
-import { Circle, Box, Camera, ExternalLink } from 'lucide-react';
+import React from 'react';
+import { Circle, Box, Camera, Code2 } from 'lucide-react';
+import { SnapLayout, SnapLayoutSelector } from './SnapLayoutSelector';
 
-export type SpaViewMode = 'simulador' | 'vision';
+export type SpaViewMode = 'simulador' | 'vision' | 'python-ide';
 
 interface HeaderProps {
   robotName: string;
   connected?: boolean;
   activeView?: SpaViewMode;
   onViewChange?: (view: SpaViewMode) => void;
+  currentLayout: SnapLayout;
+  onSelectLayout: (layout: SnapLayout) => void;
+  floatingCamera: boolean;
+  onToggleFloatingCamera: () => void;
+  floatingJoints: boolean;
+  onToggleFloatingJoints: () => void;
 }
 
-export function Header({
+export const Header: React.FC<HeaderProps> = ({
   robotName,
   connected = true,
   activeView = 'simulador',
   onViewChange,
-}: HeaderProps) {
+  currentLayout,
+  onSelectLayout,
+  floatingCamera,
+  onToggleFloatingCamera,
+  floatingJoints,
+  onToggleFloatingJoints,
+}) => {
   const handleNavClick = (
     e: React.MouseEvent<HTMLAnchorElement>,
     targetView: SpaViewMode
@@ -41,46 +55,59 @@ export function Header({
         </div>
       </div>
 
-      {onViewChange && (
-        <nav className="flex items-center gap-1 p-0.5 rounded-lg bg-black/50 border border-white/10">
-          <a
-            href="/"
-            onClick={(e) => handleNavClick(e, 'simulador')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all duration-150 ${
-              activeView === 'simulador'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40'
-                : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            <span>Simulador 3D</span>
-          </a>
+      <div className="flex items-center gap-2">
+        {onViewChange && (
+          <nav className="flex items-center gap-1 p-1 rounded-lg bg-black/40 border border-white/10">
+            <a
+              href="/"
+              onClick={(e) => handleNavClick(e, 'simulador')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 ${
+                activeView === 'simulador' && currentLayout === 'single'
+                  ? 'bg-[#00e5ff] text-black font-semibold shadow-sm shadow-cyan-500/25'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Box className="w-3.5 h-3.5" />
+              <span>Simulador 3D</span>
+            </a>
 
-          <div className="flex items-center">
             <a
               href="/vision"
               onClick={(e) => handleNavClick(e, 'vision')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-l-md text-[11px] font-medium transition-all duration-150 ${
-                activeView === 'vision'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 ${
+                activeView === 'vision' && currentLayout === 'single'
+                  ? 'bg-[#00e5ff] text-black font-semibold shadow-sm shadow-cyan-500/25'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
               }`}
             >
               <Camera className="w-3.5 h-3.5" />
-              <span>Visión y calibración</span>
+              <span>Visión</span>
             </a>
+
             <a
-              href="/vision"
-              target="_blank"
-              rel="noreferrer"
-              title="Abrir /vision en una pestaña independiente"
-              className="px-1.5 py-1 rounded-r-md text-[11px] text-gray-400 hover:text-amber-300 hover:bg-white/10 border border-l-0 border-white/10 transition-colors"
+              href="/python-ide"
+              onClick={(e) => handleNavClick(e, 'python-ide')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 ${
+                activeView === 'python-ide' && currentLayout === 'single'
+                  ? 'bg-[#00e5ff] text-black font-semibold shadow-sm shadow-cyan-500/25'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
             >
-              <ExternalLink className="w-3 h-3" />
+              <Code2 className="w-3.5 h-3.5" />
+              <span>IDE</span>
             </a>
-          </div>
-        </nav>
-      )}
+          </nav>
+        )}
+
+        <SnapLayoutSelector
+          currentLayout={currentLayout}
+          onSelectLayout={onSelectLayout}
+          floatingCamera={floatingCamera}
+          onToggleFloatingCamera={onToggleFloatingCamera}
+          floatingJoints={floatingJoints}
+          onToggleFloatingJoints={onToggleFloatingJoints}
+        />
+      </div>
 
       <div
         className={`flex items-center gap-2 px-2.5 py-1 rounded-md border ${
@@ -100,4 +127,4 @@ export function Header({
       </div>
     </header>
   );
-}
+};
