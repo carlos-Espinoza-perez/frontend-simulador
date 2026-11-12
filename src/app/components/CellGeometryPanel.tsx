@@ -154,13 +154,22 @@ export const CellGeometryPanel: React.FC = () => {
       const rot: [number, number, number] = (isSat && isBaseName) ? [90, 0, 0] : [0, 0, 0];
       const nombreLimpio = file.name.replace(/\.[^/.]+$/, '');
 
+      let colorDetectado = esBase ? '#475569' : '#94a3b8';
+      const colorAttr = geo.getAttribute('color');
+      if (colorAttr && colorAttr.count > 0) {
+        const r = Math.min(255, Math.max(0, Math.round(colorAttr.getX(0) * 255)));
+        const g = Math.min(255, Math.max(0, Math.round(colorAttr.getY(0) * 255)));
+        const b = Math.min(255, Math.max(0, Math.round(colorAttr.getZ(0) * 255)));
+        colorDetectado = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+      }
+
       const nueva = geometryService.agregar({
         nombre: esBase ? `Base Pedestal (${nombreLimpio})` : nombreLimpio,
         tipo: 'cad_stl',
         posicion: esBase ? [0, 0, 0] : [650, 0, 0],
         rotacion: rot,
         dimensiones: [dimW, dimD, dimH],
-        color: esBase ? '#475569' : '#94a3b8',
+        color: colorDetectado,
         opacidad: 1,
         visible: true,
         stlBuffer: buffer,

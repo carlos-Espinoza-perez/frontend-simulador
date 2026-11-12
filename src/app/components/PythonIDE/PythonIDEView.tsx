@@ -138,9 +138,12 @@ export const PythonIDEView: React.FC = () => {
       const fileList = await pythonIdeService.listFiles();
       setFiles(fileList);
       if (!selectedFile && fileList.length > 0) {
-        const firstPy = fileList.find((f) => f.name.endsWith('.py')) || fileList[0];
-        if (firstPy && firstPy.type === 'file') {
-          handleSelectFile(firstPy.path);
+        const targetPy = fileList.find((f) => f.type === 'file' && f.path === 'python/main.py')
+          || fileList.find((f) => f.type === 'file' && f.path === 'python/main_celda.py')
+          || fileList.find((f) => f.type === 'file' && f.name.endsWith('.py'))
+          || fileList.find((f) => f.type === 'file');
+        if (targetPy) {
+          handleSelectFile(targetPy.path);
         }
       }
     } catch (err) {

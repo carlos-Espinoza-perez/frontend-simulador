@@ -50,8 +50,18 @@ export interface PiezaOpenCV3D {
   clase?: string;
 }
 
-const STORAGE_KEY = 'robot_cell_geometries_v4';
-const BASE_STORAGE_KEY = 'robot_base_pose_v4';
+export interface HistorialTransform {
+  id: string | 'robot_base';
+  posicionAnterior?: [number, number, number];
+  rotacionAnterior?: [number, number, number];
+  baseAnterior?: RobotBasePose;
+  posicionNueva?: [number, number, number];
+  rotacionNueva?: [number, number, number];
+  baseNueva?: RobotBasePose;
+}
+
+const STORAGE_KEY = 'robot_cell_geometries_v6';
+const BASE_STORAGE_KEY = 'robot_base_pose_v6';
 
 const DEFAULT_GEOMETRIES: GeometryItem[] = [
   {
@@ -97,8 +107,9 @@ class GeometryService {
   private geometries: GeometryItem[] = [];
   private robotBasePose: RobotBasePose = { x: 0, y: 0, z: 650, rz: 0 };
   private selectedId: string | 'robot_base' | null = null;
-  private transformMode: 'translate' | 'rotate' | 'none' = 'translate';
+  private transformMode: 'translate' | 'rotate' | 'none' = 'none';
   private isDraggingGizmo: boolean = false;
+  private lastDragEndTime: number = 0;
   private colisiones: ColisionActiva[] = [];
   private alertaActual: AlertaColision | null = null;
   private alertaDisparada: boolean = false;
@@ -127,18 +138,21 @@ class GeometryService {
         if (Array.isArray(parsed) && parsed.length > 0) {
           this.geometries = parsed;
         } else {
-          this.geometries = [...DEFAULT_GEOMETRIES];
+          this.geometries = DEFAULT_GEOMETRIES.map((g) => ({ ...g }));
         }
       } else {
-        this.geometries = [...DEFAULT_GEOMETRIES];
+        this.geometries = DEFAULT_GEOMETRIES.map((g) => ({ ...g }));
       }
 
       const baseGuardada = localStorage.getItem(BASE_STORAGE_KEY);
       if (baseGuardada) {
         this.robotBasePose = JSON.parse(baseGuardada);
+      } else {
+        this.robotBasePose = { x: 0, y: 0, z: 650, rz: 0 };
       }
     } catch {
-      this.geometries = [...DEFAULT_GEOMETRIES];
+      this.geometries = DEFAULT_GEOMETRIES.map((g) => ({ ...g }));
+      this.robotBasePose = { x: 0, y: 0, z: 650, rz: 0 };
     }
   }
 
@@ -253,8 +267,19 @@ class GeometryService {
   }
 
   public seleccionar(id: string | 'robot_base' | null): void {
+    if (this.selectedId !== id) {
+      this.selectedId = id;
+      this.transformMode = 'none';
+      this.modeListeners.forEach((cb) => cb('none'));
+      this.selectListeners.forEach((cb) => cb(id));
+    }
+  }
+
+  public seleccionarConModo(id: string | 'robot_base' | null, mode: 'translate' | 'rotate' | 'none'): void {
     this.selectedId = id;
+    this.transformMode = mode;
     this.selectListeners.forEach((cb) => cb(id));
+    this.modeListeners.forEach((cb) => cb(mode));
   }
 
   public getModo(): 'translate' | 'rotate' | 'none' {
@@ -268,7 +293,14 @@ class GeometryService {
 
   public setDragging(dragging: boolean): void {
     this.isDraggingGizmo = dragging;
+    if (!dragging) {
+      this.lastDragEndTime = Date.now();
+    }
     this.dragListeners.forEach((cb) => cb(dragging));
+  }
+
+  public recienArrastrado(): boolean {
+    return this.isDraggingGizmo || Date.now() - this.lastDragEndTime < 450;
   }
 
   public actualizarColisiones(colisiones: ColisionActiva[]): void {
@@ -345,10 +377,70 @@ class GeometryService {
   }
 
   public restablecerPorDefecto(): void {
-    this.geometries = [...DEFAULT_GEOMETRIES];
-    this.restablecerBase();
+    this.geometries = DEFAULT_GEOMETRIES.map((g) => ({ ...g }));
+    this.alinearRobotSobreBase();
+    this.seleccionar(null);
+    this.setModo('none');
     this.guardarEnStorage();
     this.listeners.forEach((cb) => cb([...this.geometries]));
+  }
+
+  private historialDeshacer: HistorialTransform[] = [];
+  private historialRehacer: HistorialTransform[] = [];
+
+  public registrarAccion(accion: HistorialTransform): void {
+    this.historialDeshacer.push(accion);
+    if (this.historialDeshacer.length > 50) this.historialDeshacer.shift();
+    this.historialRehacer = [];
+  }
+
+  public deshacer(): boolean {
+    const accion = this.historialDeshacer.pop();
+    if (!accion) return false;
+
+    if (accion.id === 'robot_base' && accion.baseAnterior) {
+      const actual = this.obtenerBase();
+      this.historialRehacer.push({ ...accion, baseNueva: actual });
+      this.actualizarBase(accion.baseAnterior);
+      return true;
+    } else if (accion.id !== 'robot_base') {
+      const item = this.geometries.find((g) => g.id === accion.id);
+      if (item && accion.posicionAnterior && accion.rotacionAnterior) {
+        this.historialRehacer.push({
+          ...accion,
+          posicionNueva: [...item.posicion],
+          rotacionNueva: [...item.rotacion],
+        });
+        this.actualizar(accion.id, {
+          posicion: [...accion.posicionAnterior],
+          rotacion: [...accion.rotacionAnterior],
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public rehacer(): boolean {
+    const accion = this.historialRehacer.pop();
+    if (!accion) return false;
+
+    if (accion.id === 'robot_base' && accion.baseNueva) {
+      this.historialDeshacer.push(accion);
+      this.actualizarBase(accion.baseNueva);
+      return true;
+    } else if (accion.id !== 'robot_base') {
+      const item = this.geometries.find((g) => g.id === accion.id);
+      if (item && accion.posicionNueva && accion.rotacionNueva) {
+        this.historialDeshacer.push(accion);
+        this.actualizar(accion.id, {
+          posicion: [...accion.posicionNueva],
+          rotacion: [...accion.rotacionNueva],
+        });
+        return true;
+      }
+    }
+    return false;
   }
 
   public getMostrarPiezasVision(): boolean {
@@ -525,57 +617,24 @@ class GeometryService {
     const MARGEN_SEGURIDAD = 20;
 
     const rPieza = 30;
-    const hPieza = 40;
-    const zMesa = 650;
-    for (const p of this.visionPieces) {
-      const px = p.posicion_mm[0];
-      const py = p.posicion_mm[1];
-      const pz = zMesa + hPieza / 2;
-      for (let s = 0; s < 6; s++) {
-        const A = ptsMundo[s];
-        const B = ptsMundo[s + 1];
-        const rEff = segmentRadii[s] + rPieza + MARGEN_SEGURIDAD;
-        const rEffSq = rEff * rEff;
-        const dx = B[0] - A[0];
-        const dy = B[1] - A[1];
-        const dz = B[2] - A[2];
-        const len = Math.hypot(dx, dy, dz);
-        const steps = Math.max(2, Math.ceil(len / 20));
-        for (let step = 0; step <= steps; step++) {
-          const t = step / steps;
-          const kx = A[0] + t * dx;
-          const ky = A[1] + t * dy;
-          const kz = A[2] + t * dz;
-          const distSq = (kx - px) ** 2 + (ky - py) ** 2 + Math.max(0, Math.abs(kz - pz) - hPieza / 2) ** 2;
-          if (distSq <= rEffSq) {
-            const nombreLink = s === 5 ? 'Efector Final / Muñeca' : linkNames[s + 1];
-            return {
-              hayColision: true,
-              esAgarreValido: false,
-              link: nombreLink,
-              obstaculo: `Pieza #${p.id}`,
-              detalle: `Riesgo de colisión inminente de ${nombreLink} con Pieza #${p.id} en [X=${Math.round(px)}, Y=${Math.round(py)}] mm. Parada preventiva inmediata.`,
-            };
-          }
-        }
-      }
-    }
-
+    const mesaGeom = this.geometries.find((g) => g.id === 'geom_mesa_trabajo' || g.tipo === 'table');
+    const zMesa = mesaGeom ? mesaGeom.posicion[2] + mesaGeom.dimensiones[2] : 772;
     const tcp = ptsMundo[6];
+
     if (tcp[0] >= 300 && tcp[0] <= 1000 && Math.abs(tcp[1]) <= 750) {
-      if (tcp[2] <= 655) {
+      if (tcp[2] <= zMesa - 2) {
         return {
           hayColision: true,
           esAgarreValido: false,
           link: 'Efector Final',
           obstaculo: 'Mesa Robótica',
-          detalle: `Efector Final descendiendo a Z=${Math.round(tcp[2])} mm (bajo cota de seguridad de mesa 655 mm). Parada preventiva inmediata.`,
+          detalle: `Efector Final descendiendo a Z=${Math.round(tcp[2])} mm (bajo cota de seguridad de mesa ${zMesa} mm). Parada preventiva inmediata.`,
         };
       }
     }
 
     for (const g of this.geometries) {
-      if (!g.visible || g.esBaseRobot) continue;
+      if (!g.visible || g.esBaseRobot || g.id === 'geom_mesa_trabajo' || g.tipo === 'table') continue;
 
       const [gx, gy, gz] = g.posicion;
       const [gw, gd, gh] = g.dimensiones;

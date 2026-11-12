@@ -1,12 +1,11 @@
 import { useRef, useEffect, useState, Suspense, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, Line, TransformControls } from '@react-three/drei';
-import { Maximize2, Minimize2, RotateCcw, Keyboard, Move, RotateCw, AlertTriangle, X } from 'lucide-react';
+import { OrbitControls, Grid, Line, TransformControls, Html } from '@react-three/drei';
+import { Maximize2, Minimize2, RotateCcw, Keyboard, Move, RotateCw, AlertTriangle, X, Ruler, Box, Trash2 } from 'lucide-react';
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import api from '../../services/api';
 import { CellGeometries } from './CellGeometries';
-import { CellDistanceDimension3D, CellDistanceHUD } from './CellDistanceIndicator';
 import geometryService, { RobotBasePose, ColisionActiva } from '../../services/geometryService';
 
 interface STLModelProps {
@@ -51,6 +50,8 @@ function STLModel({ url, color = '#E8E8E8', scale = 1, position, isColliding }: 
 
   if (!geometry) return null;
 
+  const hasColors = Boolean((geometry as any)?.hasColors || geometry?.getAttribute('color'));
+
   return (
     <mesh
       ref={meshRef}
@@ -60,7 +61,8 @@ function STLModel({ url, color = '#E8E8E8', scale = 1, position, isColliding }: 
       position={position}
     >
       <meshStandardMaterial
-        color={isColliding ? '#ef4444' : color}
+        vertexColors={hasColors && !isColliding}
+        color={isColliding ? '#ef4444' : (hasColors ? '#ffffff' : color)}
         emissive={isColliding ? '#b91c1c' : '#000000'}
         emissiveIntensity={isColliding ? 0.7 : 0}
         metalness={0.7}
@@ -188,6 +190,11 @@ interface RobotExtendedProps extends RobotViewerProps {
   collidingLinks: Set<number>;
   linkRefs?: React.MutableRefObject<(THREE.Group | null)[]>;
   robotBaseRef?: React.MutableRefObject<THREE.Group | null>;
+  onContextMenu?: (e: any, id: string | 'robot_base') => void;
+  onPointClick?: (point: THREE.Vector3, name: string, object?: THREE.Object3D) => void;
+  onSnapHover?: (point: THREE.Vector3, object: THREE.Object3D, name: string) => void;
+  onSurfaceClick?: (point: THREE.Vector3, name: string, object?: THREE.Object3D) => void;
+  measuringActive?: boolean;
 }
 
 function Robot({
@@ -202,6 +209,11 @@ function Robot({
   collidingLinks,
   linkRefs,
   robotBaseRef,
+  onContextMenu,
+  onPointClick,
+  onSnapHover,
+  onSurfaceClick,
+  measuringActive,
 }: RobotExtendedProps) {
   const localBaseRef = useRef<THREE.Group>(null);
   const isBaseSelected = selectedId === 'robot_base';
@@ -342,7 +354,16 @@ function Robot({
         rotation={[0, 0, (basePose.rz * Math.PI) / 180]}
         onClick={(e) => {
           e.stopPropagation();
+          if (measuringActive && onPointClick) {
+            onPointClick(e.point, 'Base Robot');
+            return;
+          }
           geometryService.seleccionar('robot_base');
+        }}
+        onContextMenu={(e) => {
+          e.stopPropagation();
+          if (e.nativeEvent) e.nativeEvent.preventDefault();
+          if (onContextMenu) onContextMenu(e, 'robot_base');
         }}
       >
         {isBaseSelected && (
@@ -361,6 +382,35 @@ function Robot({
               ref={(el: THREE.Group | null) => {
                 groupRefs.current[index] = el;
                 if (linkRefs) linkRefs.current[index] = el;
+              }}
+              onClick={(e) => {
+                if (geometryService.recienArrastrado()) return;
+                if (measuringActive && onPointClick) {
+                  e.stopPropagation();
+                  onPointClick(e.point, eslabon.nombre, e.object);
+                  return;
+                }
+                const currentModo = geometryService.getModo();
+                const currentSel = geometryService.getSeleccionado();
+                if (currentModo === 'translate' && currentSel && currentSel !== 'robot_base' && onSurfaceClick) {
+                  e.stopPropagation();
+                  onSurfaceClick(e.point, eslabon.nombre, e.object);
+                  return;
+                }
+              }}
+              onPointerMove={(e) => {
+                const currentModo = geometryService.getModo();
+                const currentSel = geometryService.getSeleccionado();
+                const isMoving = currentModo === 'translate' && currentSel && currentSel !== 'robot_base';
+                if ((measuringActive || isMoving) && onSnapHover) {
+                  e.stopPropagation();
+                  onSnapHover(e.point, e.object, eslabon.nombre);
+                }
+              }}
+              onContextMenu={(e) => {
+                e.stopPropagation();
+                if (e.nativeEvent) e.nativeEvent.preventDefault();
+                if (onContextMenu) onContextMenu(e, 'robot_base');
               }}
             >
               <STLModel
@@ -462,6 +512,12 @@ function GizmoManager({
     geometryService.getModo()
   );
   const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{
+    id: string | 'robot_base';
+    posicion?: [number, number, number];
+    rotacion?: [number, number, number];
+    basePose?: RobotBasePose;
+  } | null>(null);
 
   useEffect(() => {
     const unsubSel = geometryService.suscribirSeleccion(setSelectedId);
@@ -472,38 +528,46 @@ function GizmoManager({
     };
   }, []);
 
-  useEffect(() => {
-    if (!proxyRef.current || !selectedId) return;
+  const syncProxy = () => {
+    if (isDraggingRef.current || !proxyRef.current) return;
+    const curSel = geometryService.getSeleccionado();
+    if (!curSel) {
+      if (transformRef.current) transformRef.current.detach();
+      return;
+    }
 
-    const syncProxy = () => {
-      if (isDraggingRef.current) return;
-      if (selectedId === 'robot_base') {
-        const base = geometryService.obtenerBase();
-        proxyRef.current?.position.set(
-          0.070 + base.x / 1000,
-          base.z / 1000,
-          -base.y / 1000
+    if (curSel === 'robot_base') {
+      const base = geometryService.obtenerBase();
+      proxyRef.current.position.set(
+        0.070 + base.x / 1000,
+        base.z / 1000,
+        -base.y / 1000
+      );
+      proxyRef.current.rotation.set(0, (-base.rz * Math.PI) / 180, 0);
+    } else {
+      const all = geometryService.obtenerTodas();
+      const item = all.find((g) => g.id === curSel);
+      if (item) {
+        proxyRef.current.position.set(
+          0.070 + item.posicion[0] / 1000,
+          item.posicion[2] / 1000,
+          -item.posicion[1] / 1000
         );
-        proxyRef.current?.rotation.set(0, (-base.rz * Math.PI) / 180, 0);
-      } else {
-        const all = geometryService.obtenerTodas();
-        const item = all.find((g) => g.id === selectedId);
-        if (item && proxyRef.current) {
-          const heightOffset = item.tipo === 'table' ? item.dimensiones[2] / 1000 : 0;
-          proxyRef.current.position.set(
-            0.070 + item.posicion[0] / 1000,
-            item.posicion[2] / 1000 + heightOffset,
-            -item.posicion[1] / 1000
-          );
-          proxyRef.current.rotation.set(
-            (item.rotacion[0] * Math.PI) / 180,
-            (-item.rotacion[2] * Math.PI) / 180,
-            (item.rotacion[1] * Math.PI) / 180
-          );
-        }
+        proxyRef.current.rotation.set(
+          (item.rotacion[0] * Math.PI) / 180,
+          (-item.rotacion[2] * Math.PI) / 180,
+          (item.rotacion[1] * Math.PI) / 180
+        );
       }
-    };
+    }
 
+    proxyRef.current.updateMatrixWorld(true);
+    if (transformRef.current) {
+      transformRef.current.attach(proxyRef.current);
+    }
+  };
+
+  useEffect(() => {
     syncProxy();
     const unsubG = geometryService.suscribir(syncProxy);
     const unsubB = geometryService.suscribirBase(syncProxy);
@@ -511,7 +575,7 @@ function GizmoManager({
       unsubG();
       unsubB();
     };
-  }, [selectedId]);
+  }, [selectedId, transformMode]);
 
   useEffect(() => {
     const tc = transformRef.current;
@@ -523,23 +587,83 @@ function GizmoManager({
         controlsRef.current.enabled = !e.value;
       }
       geometryService.setDragging(e.value);
+
+      const curSel = geometryService.getSeleccionado();
+      if (e.value === true) {
+        if (curSel === 'robot_base') {
+          dragStartRef.current = {
+            id: 'robot_base',
+            basePose: geometryService.obtenerBase(),
+          };
+        } else if (curSel) {
+          const item = geometryService.obtenerTodas().find((g) => g.id === curSel);
+          if (item) {
+            dragStartRef.current = {
+              id: item.id,
+              posicion: [...item.posicion],
+              rotacion: [...item.rotacion],
+            };
+          }
+        }
+      } else {
+        if (dragStartRef.current) {
+          if (curSel === 'robot_base' && dragStartRef.current.basePose) {
+            const finalBase = geometryService.obtenerBase();
+            const initBase = dragStartRef.current.basePose;
+            if (
+              initBase.x !== finalBase.x ||
+              initBase.y !== finalBase.y ||
+              initBase.z !== finalBase.z ||
+              initBase.rz !== finalBase.rz
+            ) {
+              geometryService.registrarAccion({
+                id: 'robot_base',
+                baseAnterior: initBase,
+                baseNueva: finalBase,
+              });
+            }
+          } else if (curSel && dragStartRef.current.posicion && dragStartRef.current.rotacion) {
+            const item = geometryService.obtenerTodas().find((g) => g.id === curSel);
+            if (item) {
+              const initPos = dragStartRef.current.posicion;
+              const initRot = dragStartRef.current.rotacion;
+              if (
+                initPos[0] !== item.posicion[0] ||
+                initPos[1] !== item.posicion[1] ||
+                initPos[2] !== item.posicion[2] ||
+                initRot[0] !== item.rotacion[0] ||
+                initRot[1] !== item.rotacion[1] ||
+                initRot[2] !== item.rotacion[2]
+              ) {
+                geometryService.registrarAccion({
+                  id: item.id,
+                  posicionAnterior: initPos,
+                  rotacionAnterior: initRot,
+                  posicionNueva: [...item.posicion],
+                  rotacionNueva: [...item.rotacion],
+                });
+              }
+            }
+          }
+          dragStartRef.current = null;
+        }
+      }
     };
 
     const onObjectChange = () => {
-      if (!proxyRef.current || !selectedId) return;
+      if (!proxyRef.current) return;
+      const curSel = geometryService.getSeleccionado();
+      if (!curSel) return;
+
       const p = proxyRef.current.position;
       const r = proxyRef.current.rotation;
 
-      const all = geometryService.obtenerTodas();
-      const item = all.find((g) => g.id === selectedId);
-      const heightOffset = item && item.tipo === 'table' ? item.dimensiones[2] / 1000 : 0;
-
       const posX = Math.round((p.x - 0.070) * 1000);
       const posY = Math.round(-p.z * 1000);
-      const posZ = Math.round((p.y - heightOffset) * 1000);
+      const posZ = Math.round(p.y * 1000);
       const rotZ = Math.round((-r.y * 180) / Math.PI);
 
-      if (selectedId === 'robot_base') {
+      if (curSel === 'robot_base') {
         geometryService.actualizarBase({
           x: posX,
           y: posY,
@@ -547,7 +671,7 @@ function GizmoManager({
           rz: rotZ,
         });
       } else {
-        geometryService.actualizar(selectedId, {
+        geometryService.actualizar(curSel, {
           posicion: [posX, posY, posZ],
           rotacion: [
             Math.round((r.x * 180) / Math.PI),
@@ -565,7 +689,7 @@ function GizmoManager({
       tc.removeEventListener('dragging-changed', onDragChange);
       tc.removeEventListener('objectChange', onObjectChange);
     };
-  }, [selectedId, controlsRef]);
+  }, [controlsRef, selectedId, transformMode]);
 
   useEffect(() => {
     const onWindowPointerUp = () => {
@@ -585,7 +709,7 @@ function GizmoManager({
     };
   }, [controlsRef]);
 
-  if (!selectedId || transformMode === 'none') return null;
+  const isEnabled = transformMode !== 'none' && !!selectedId;
 
   return (
     <>
@@ -593,10 +717,388 @@ function GizmoManager({
       <TransformControls
         ref={transformRef}
         object={proxyRef}
-        mode={transformMode}
+        mode={transformMode === 'rotate' ? 'rotate' : 'translate'}
         size={0.7}
+        enabled={isEnabled}
+        visible={isEnabled}
       />
     </>
+  );
+}
+
+function computeSnapPoint(
+  hitPoint: THREE.Vector3,
+  object?: THREE.Object3D | null,
+  name?: string
+): { point: THREE.Vector3; label: string } {
+  if (!object || name === 'Plano de Celda' || Math.abs(hitPoint.y) < 0.005) {
+    const step = 0.05;
+    const sx = 0.070 + Math.round((hitPoint.x - 0.070) / step) * step;
+    const sz = Math.round(hitPoint.z / step) * step;
+    return {
+      point: new THREE.Vector3(sx, 0, sz),
+      label: 'Rejilla (50mm)',
+    };
+  }
+
+  let bbox: THREE.Box3 | null = null;
+  let targetObj: THREE.Object3D = object;
+
+  if ((object as THREE.Mesh).isMesh && (object as THREE.Mesh).geometry) {
+    const geo = (object as THREE.Mesh).geometry;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    bbox = geo.boundingBox;
+  } else {
+    object.traverse((child) => {
+      if (!bbox && (child as THREE.Mesh).isMesh && (child as THREE.Mesh).geometry) {
+        const geo = (child as THREE.Mesh).geometry;
+        if (!geo.boundingBox) geo.computeBoundingBox();
+        bbox = geo.boundingBox;
+        targetObj = child;
+      }
+    });
+    if (!bbox) {
+      bbox = new THREE.Box3().setFromObject(object);
+      targetObj = object;
+    }
+  }
+
+  if (!bbox) {
+    return { point: hitPoint.clone(), label: name || 'Punto' };
+  }
+
+  const { min, max } = bbox;
+  const dx = max.x - min.x;
+  const dy = max.y - min.y;
+  const dz = max.z - min.z;
+  const midX = (min.x + max.x) / 2;
+  const midY = (min.y + max.y) / 2;
+  const midZ = (min.z + max.z) / 2;
+
+  const candidates: { local: THREE.Vector3; label: string }[] = [];
+
+  for (const cx of [min.x, max.x]) {
+    for (const cy of [min.y, max.y]) {
+      for (const cz of [min.z, max.z]) {
+        candidates.push({ local: new THREE.Vector3(cx, cy, cz), label: 'Esquina' });
+      }
+    }
+  }
+
+  candidates.push({ local: new THREE.Vector3(midX, midY, midZ), label: 'Centro' });
+  candidates.push({ local: new THREE.Vector3(midX, max.y, midZ), label: 'Centro Superior' });
+  candidates.push({ local: new THREE.Vector3(midX, min.y, midZ), label: 'Centro Inferior' });
+  candidates.push({ local: new THREE.Vector3(max.x, midY, midZ), label: 'Centro Lateral' });
+  candidates.push({ local: new THREE.Vector3(min.x, midY, midZ), label: 'Centro Lateral' });
+  candidates.push({ local: new THREE.Vector3(midX, midY, max.z), label: 'Centro Frontal' });
+  candidates.push({ local: new THREE.Vector3(midX, midY, min.z), label: 'Centro Posterior' });
+
+  const fractions = [
+    { t: 1 / 3, l: 'Lateral 1/3' },
+    { t: 1 / 2, l: 'Punto Medio' },
+    { t: 2 / 3, l: 'Lateral 2/3' },
+  ];
+
+  for (const cy of [min.y, max.y]) {
+    for (const cz of [min.z, max.z]) {
+      for (const f of fractions) {
+        candidates.push({ local: new THREE.Vector3(min.x + f.t * dx, cy, cz), label: f.l });
+      }
+    }
+  }
+
+  for (const cx of [min.x, max.x]) {
+    for (const cy of [min.y, max.y]) {
+      for (const f of fractions) {
+        candidates.push({ local: new THREE.Vector3(cx, cy, min.z + f.t * dz), label: f.l });
+      }
+    }
+  }
+
+  for (const cx of [min.x, max.x]) {
+    for (const cz of [min.z, max.z]) {
+      for (const f of fractions) {
+        candidates.push({ local: new THREE.Vector3(cx, min.y + f.t * dy, cz), label: f.l });
+      }
+    }
+  }
+
+  for (const fx of [1 / 3, 1 / 2, 2 / 3]) {
+    for (const fz of [1 / 3, 1 / 2, 2 / 3]) {
+      candidates.push({
+        local: new THREE.Vector3(min.x + fx * dx, max.y, min.z + fz * dz),
+        label: fx === 0.5 && fz === 0.5 ? 'Centro Superior' : 'Superficie 1/3',
+      });
+    }
+  }
+
+  let bestPt = hitPoint.clone();
+  let bestDist = Infinity;
+  let bestLabel = 'Punto';
+
+  const matrix = targetObj.matrixWorld;
+  for (const c of candidates) {
+    const worldPt = c.local.clone().applyMatrix4(matrix);
+    const dist = worldPt.distanceTo(hitPoint);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPt = worldPt;
+      bestLabel = c.label;
+    }
+  }
+
+  return { point: bestPt, label: bestLabel };
+}
+
+function MeasurementVisualizer({
+  measureState,
+  snapPreview,
+}: {
+  measureState?: {
+    active: boolean;
+    pointA: [number, number, number] | null;
+    pointB: [number, number, number] | null;
+    labelA?: string;
+    labelB?: string;
+  };
+  snapPreview?: { point: THREE.Vector3; label: string } | null;
+}) {
+  if (!measureState?.active && !snapPreview) return null;
+
+  const pA = measureState.pointA
+    ? new THREE.Vector3(
+        0.070 + measureState.pointA[0] / 1000,
+        measureState.pointA[2] / 1000,
+        -measureState.pointA[1] / 1000
+      )
+    : null;
+
+  const pB = measureState.pointB
+    ? new THREE.Vector3(
+        0.070 + measureState.pointB[0] / 1000,
+        measureState.pointB[2] / 1000,
+        -measureState.pointB[1] / 1000
+      )
+    : null;
+
+  const dx = measureState.pointA && measureState.pointB ? measureState.pointB[0] - measureState.pointA[0] : 0;
+  const dy = measureState.pointA && measureState.pointB ? measureState.pointB[1] - measureState.pointA[1] : 0;
+  const dz = measureState.pointA && measureState.pointB ? measureState.pointB[2] - measureState.pointA[2] : 0;
+  const d3D = Math.hypot(dx, dy, dz);
+
+  const pMid = pA && pB
+    ? new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5).add(new THREE.Vector3(0, 0.04, 0))
+    : null;
+
+  const lineGeo = useMemo(() => {
+    if (!pA || !pB) return null;
+    return new THREE.BufferGeometry().setFromPoints([pA, pB]);
+  }, [pA?.x, pA?.y, pA?.z, pB?.x, pB?.y, pB?.z]);
+
+  return (
+    <group>
+      {pA && (
+        <mesh position={pA}>
+          <sphereGeometry args={[0.015, 16, 16]} />
+          <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.6} />
+        </mesh>
+      )}
+
+      {pB && (
+        <mesh position={pB}>
+          <sphereGeometry args={[0.015, 16, 16]} />
+          <meshStandardMaterial color="#38bdf8" emissive="#38bdf8" emissiveIntensity={0.6} />
+        </mesh>
+      )}
+
+      {lineGeo && pMid && (
+        <>
+          <line geometry={lineGeo}>
+            <lineBasicMaterial color="#38bdf8" linewidth={2} />
+          </line>
+          <Html position={pMid} center pointerEvents="none">
+            <div className="flex flex-col items-center px-2.5 py-1.5 rounded-xl bg-slate-950/95 border border-sky-400/60 shadow-2xl backdrop-blur-md text-[11px] font-mono text-white whitespace-nowrap">
+              <div className="flex items-center gap-1.5 font-bold text-sky-300">
+                <Ruler className="w-3.5 h-3.5 text-sky-400" />
+                <span>{Math.round(d3D)} mm</span>
+              </div>
+              <div className="text-[9px] text-gray-400 flex gap-2 mt-0.5">
+                <span>ΔX: {Math.round(dx)}</span>
+                <span>ΔY: {Math.round(dy)}</span>
+                <span>ΔZ: {Math.round(dz)}</span>
+              </div>
+            </div>
+          </Html>
+        </>
+      )}
+
+      {snapPreview && !pB && (
+        <group position={snapPreview.point}>
+          <mesh>
+            <octahedronGeometry args={[0.012, 0]} />
+            <meshStandardMaterial
+              color="#38bdf8"
+              emissive="#38bdf8"
+              emissiveIntensity={0.8}
+              wireframe
+            />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.016, 0.022, 24]} />
+            <meshBasicMaterial color="#38bdf8" transparent opacity={0.7} />
+          </mesh>
+          <Html position={[0, 0.03, 0]} center pointerEvents="none">
+            <div className="px-1.5 py-0.5 rounded bg-slate-950/90 border border-sky-400/70 shadow-lg text-[9px] font-mono text-sky-300 whitespace-nowrap">
+              ✦ {snapPreview.label}
+            </div>
+          </Html>
+        </group>
+      )}
+    </group>
+  );
+}
+
+function PieceContextMenu({
+  state,
+  onClose,
+  onSetModo,
+  transformMode,
+  onStartMeasure,
+  onEliminar,
+}: {
+  state: {
+    visible: boolean;
+    x: number;
+    y: number;
+    targetId: string | 'robot_base';
+    clickPoint?: [number, number, number];
+  };
+  onClose: () => void;
+  onSetModo: (modo: 'translate' | 'rotate' | 'none') => void;
+  transformMode: 'translate' | 'rotate' | 'none';
+  onStartMeasure: () => void;
+  onEliminar: (id: string) => void;
+}) {
+  if (!state.visible) return null;
+
+  const isBase = state.targetId === 'robot_base';
+  const base = isBase ? geometryService.obtenerBase() : null;
+  const item = !isBase ? geometryService.obtenerTodas().find((g) => g.id === state.targetId) : null;
+
+  const nombre = isBase ? 'Base Robot' : item?.nombre || 'Pieza';
+  const tipo = isBase ? 'BASE' : item?.tipo.toUpperCase() || 'CAD';
+  const pos = isBase ? [base!.x, base!.y, base!.z] : item?.posicion || [0, 0, 0];
+  const rot = isBase ? [0, 0, base!.rz] : item?.rotacion || [0, 0, 0];
+  const dim = item?.dimensiones;
+
+  return (
+    <div
+      style={{ left: state.x, top: state.y }}
+      className="fixed z-50 w-64 rounded-xl bg-slate-950/95 backdrop-blur-xl border border-white/15 shadow-2xl p-3 text-xs select-none"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between pb-2 border-b border-white/10 mb-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Box className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+          <span className="font-semibold text-white truncate">{nombre}</span>
+          <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-gray-400 font-mono">
+            {tipo}
+          </span>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <div className="space-y-1 font-mono text-[10px] bg-black/40 p-2 rounded-lg border border-white/5 mb-2.5">
+        <div className="flex justify-between text-gray-400">
+          <span>Pos [X, Y, Z]:</span>
+          <span className="text-sky-300">
+            {pos[0]}, {pos[1]}, {pos[2]} mm
+          </span>
+        </div>
+        <div className="flex justify-between text-gray-400">
+          <span>Rot [Rx, Ry, Rz]:</span>
+          <span className="text-emerald-300">
+            {rot[0]}°, {rot[1]}°, {rot[2]}°
+          </span>
+        </div>
+        {dim && (
+          <div className="flex justify-between text-gray-400">
+            <span>Dim [An, La, Al]:</span>
+            <span className="text-amber-300">
+              {dim[0]} × {dim[1]} × {dim[2]} mm
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <button
+          onClick={() => {
+            onSetModo(transformMode === 'translate' ? 'none' : 'translate');
+            onClose();
+          }}
+          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg transition-colors ${
+            transformMode === 'translate'
+              ? 'bg-cyan-500/25 border border-cyan-400/40 text-cyan-200'
+              : 'hover:bg-white/10 text-gray-300 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Move className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Mover</span>
+          </div>
+          {transformMode === 'translate' && (
+            <span className="text-[9px] text-cyan-300 font-mono">ACTIVO</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            onSetModo(transformMode === 'rotate' ? 'none' : 'rotate');
+            onClose();
+          }}
+          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg transition-colors ${
+            transformMode === 'rotate'
+              ? 'bg-cyan-500/25 border border-cyan-400/40 text-cyan-200'
+              : 'hover:bg-white/10 text-gray-300 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Rotar</span>
+          </div>
+          {transformMode === 'rotate' && (
+            <span className="text-[9px] text-cyan-300 font-mono">ACTIVO</span>
+          )}
+        </button>
+
+        <button
+          onClick={onStartMeasure}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+        >
+          <Ruler className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Medir distancia desde aquí</span>
+        </button>
+
+        {!isBase && (
+          <button
+            onClick={() => {
+              if (state.targetId) onEliminar(state.targetId);
+              onClose();
+            }}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Eliminar pieza</span>
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -614,7 +1116,16 @@ function Scene({
   customPivots,
   customPositions,
   customTcpOffset,
-  onWorkspaceToggle
+  onWorkspaceToggle,
+  onContextMenu,
+  onPointClick,
+  onSnapHover,
+  onSurfaceClick,
+  snapPreview,
+  measureState,
+  measuringActive,
+  onToggleMeasure,
+  onCloseMeasure,
 }: RobotViewerProps & {
   showWorkspace: boolean;
   workspacePoints: number[][];
@@ -625,6 +1136,21 @@ function Scene({
   customPositions: number[][];
   customTcpOffset: [number, number, number];
   onWorkspaceToggle?: () => void;
+  onContextMenu?: (e: any, id: string | 'robot_base') => void;
+  onPointClick?: (point: THREE.Vector3, name: string, object?: THREE.Object3D) => void;
+  onSnapHover?: (point: THREE.Vector3, object: THREE.Object3D, name: string) => void;
+  onSurfaceClick?: (point: THREE.Vector3, name: string, object?: THREE.Object3D) => void;
+  snapPreview?: { point: THREE.Vector3; label: string } | null;
+  measureState?: {
+    active: boolean;
+    pointA: [number, number, number] | null;
+    pointB: [number, number, number] | null;
+    labelA?: string;
+    labelB?: string;
+  };
+  measuringActive?: boolean;
+  onToggleMeasure?: () => void;
+  onCloseMeasure?: () => void;
 }) {
   const gridSize = robotInfo?.workspace?.grid?.tamaño || 10;
   const gridDivision = robotInfo?.workspace?.grid?.division || 0.1;
@@ -737,66 +1263,112 @@ function Scene({
         return;
       }
 
-      if (selectedId) {
-        const step = e.shiftKey ? 50 : e.altKey ? 2 : 10;
-        const angleStep = e.shiftKey ? 45 : e.altKey ? 5 : 15;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          geometryService.rehacer();
+        } else {
+          geometryService.deshacer();
+        }
+        return;
+      }
 
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        geometryService.rehacer();
+        return;
+      }
+
+      if (selectedId) {
         if (e.key === 'Escape') {
+          if (onCloseMeasure) onCloseMeasure();
           geometryService.seleccionar(null);
           return;
         }
 
-        let dx = 0;
-        let dy = 0;
-        let dz = 0;
-        let drz = 0;
+        if (transformMode !== 'none') {
+          const step = e.shiftKey ? 50 : e.altKey ? 2 : 10;
+          const angleStep = e.shiftKey ? 45 : e.altKey ? 5 : 15;
 
-        if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
-          dx = step;
-          e.preventDefault();
-        } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
-          dx = -step;
-          e.preventDefault();
-        } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-          dy = step;
-          e.preventDefault();
-        } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-          dy = -step;
-          e.preventDefault();
-        } else if (e.key === 'PageUp' || e.key === 'q' || e.key === 'Q') {
-          dz = step;
-          e.preventDefault();
-        } else if (e.key === 'PageDown' || (e.key === 'e' && selectedId)) {
-          dz = -step;
-          e.preventDefault();
-        } else if (e.key === 'r' || e.key === 'R') {
-          drz = angleStep;
-          e.preventDefault();
-        }
+          let dx = 0;
+          let dy = 0;
+          let dz = 0;
+          let drz = 0;
 
-        if (dx !== 0 || dy !== 0 || dz !== 0 || drz !== 0) {
-          if (selectedId === 'robot_base') {
-            const current = geometryService.obtenerBase();
-            geometryService.actualizarBase({
-              x: current.x + dx,
-              y: current.y + dy,
-              z: current.z + dz,
-              rz: current.rz + drz,
-            });
-          } else {
-            const all = geometryService.obtenerTodas();
-            const it = all.find((g) => g.id === selectedId);
-            if (it) {
-              geometryService.actualizar(selectedId, {
-                posicion: [it.posicion[0] + dx, it.posicion[1] + dy, it.posicion[2] + dz],
-                rotacion: [it.rotacion[0], it.rotacion[1], (it.rotacion[2] + drz) % 360],
-              });
+          if (transformMode === 'translate') {
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+              dx = step;
+              e.preventDefault();
+            } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+              dx = -step;
+              e.preventDefault();
+            } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+              dy = step;
+              e.preventDefault();
+            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+              dy = -step;
+              e.preventDefault();
+            } else if (e.key === 'PageUp' || e.key === 'q' || e.key === 'Q') {
+              dz = step;
+              e.preventDefault();
+            } else if (e.key === 'PageDown' || (e.key === 'e' && selectedId)) {
+              dz = -step;
+              e.preventDefault();
+            }
+          } else if (transformMode === 'rotate') {
+            if (e.key === 'r' || e.key === 'R' || e.key === 'ArrowRight') {
+              drz = angleStep;
+              e.preventDefault();
+            } else if (e.key === 'ArrowLeft') {
+              drz = -angleStep;
+              e.preventDefault();
             }
           }
-          return;
+
+          if (dx !== 0 || dy !== 0 || dz !== 0 || drz !== 0) {
+            if (selectedId === 'robot_base') {
+              const current = geometryService.obtenerBase();
+              geometryService.registrarAccion({
+                id: 'robot_base',
+                baseAnterior: { ...current },
+                baseNueva: {
+                  x: current.x + dx,
+                  y: current.y + dy,
+                  z: current.z + dz,
+                  rz: current.rz + drz,
+                },
+              });
+              geometryService.actualizarBase({
+                x: current.x + dx,
+                y: current.y + dy,
+                z: current.z + dz,
+                rz: current.rz + drz,
+              });
+            } else {
+              const all = geometryService.obtenerTodas();
+              const it = all.find((g) => g.id === selectedId);
+              if (it) {
+                geometryService.registrarAccion({
+                  id: selectedId,
+                  posicionAnterior: [...it.posicion],
+                  rotacionAnterior: [...it.rotacion],
+                  posicionNueva: [it.posicion[0] + dx, it.posicion[1] + dy, it.posicion[2] + dz],
+                  rotacionNueva: [it.rotacion[0], it.rotacion[1], (it.rotacion[2] + drz) % 360],
+                });
+                geometryService.actualizar(selectedId, {
+                  posicion: [it.posicion[0] + dx, it.posicion[1] + dy, it.posicion[2] + dz],
+                  rotacion: [it.rotacion[0], it.rotacion[1], (it.rotacion[2] + drz) % 360],
+                });
+              }
+            }
+            return;
+          }
         }
       }
 
+      if ((e.key === 'm' || e.key === 'M') && onToggleMeasure) {
+        onToggleMeasure();
+      }
       if ((e.key === 'p' || e.key === 'P') && onPivotsToggle) {
         onPivotsToggle(!showPivots);
       }
@@ -812,7 +1384,7 @@ function Scene({
     };
 
     const handleWheel = (e: WheelEvent) => {
-      if (!selectedId || (!e.altKey && !e.ctrlKey)) return;
+      if (!selectedId || transformMode === 'none' || (!e.altKey && !e.ctrlKey)) return;
       e.preventDefault();
       const delta = Math.sign(e.deltaY) * -5;
       if (e.altKey) {
@@ -842,7 +1414,7 @@ function Scene({
       window.removeEventListener('keydown', handleKeyPress);
       window.removeEventListener('wheel', handleWheel);
     };
-  }, [showTrajectory, showPivots, onPivotsToggle, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle, selectedId]);
+  }, [showTrajectory, showPivots, onPivotsToggle, onTrajectoryToggle, onClearTrajectory, onWorkspaceToggle, selectedId, transformMode]);
 
   return (
     <>
@@ -883,7 +1455,35 @@ function Scene({
         infiniteGrid
       />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0, 0]}
+        receiveShadow
+        onClick={(e) => {
+          if (geometryService.recienArrastrado()) return;
+          if (measuringActive && onPointClick) {
+            e.stopPropagation();
+            onPointClick(e.point, 'Plano de Celda', e.object);
+            return;
+          }
+          const currentModo = geometryService.getModo();
+          const currentSel = geometryService.getSeleccionado();
+          if (currentModo === 'translate' && currentSel && onSurfaceClick) {
+            e.stopPropagation();
+            onSurfaceClick(e.point, 'Plano de Celda', e.object);
+            return;
+          }
+        }}
+        onPointerMove={(e) => {
+          const currentModo = geometryService.getModo();
+          const currentSel = geometryService.getSeleccionado();
+          const isMoving = currentModo === 'translate' && currentSel;
+          if ((measuringActive || isMoving) && onSnapHover) {
+            e.stopPropagation();
+            onSnapHover(e.point, e.object, 'Plano de Celda');
+          }
+        }}
+      >
         <planeGeometry args={[20, 20]} />
         <shadowMaterial opacity={0.3} />
       </mesh>
@@ -913,9 +1513,14 @@ function Scene({
       <CellGeometries
         geomRefs={geomRefs}
         colisiones={colisiones}
+        onContextMenu={onContextMenu}
+        onPointClick={onPointClick}
+        onSnapHover={onSnapHover}
+        onSurfaceClick={onSurfaceClick}
+        measuringActive={measuringActive}
       />
 
-      <CellDistanceDimension3D />
+      <MeasurementVisualizer measureState={measureState} snapPreview={snapPreview} />
 
       <Suspense fallback={null}>
         <Robot
@@ -933,6 +1538,11 @@ function Scene({
           collidingLinks={collidingLinks}
           linkRefs={linkRefs}
           robotBaseRef={robotBaseRef}
+          onContextMenu={onContextMenu}
+          onPointClick={onPointClick}
+          onSnapHover={onSnapHover}
+          onSurfaceClick={onSurfaceClick}
+          measuringActive={measuringActive}
         />
       </Suspense>
 
@@ -972,7 +1582,13 @@ function CollisionOverlay() {
   );
 }
 
-function GizmoQuickToolbar() {
+function GizmoQuickToolbar({
+  measuringActive,
+  onToggleMeasure,
+}: {
+  measuringActive?: boolean;
+  onToggleMeasure?: () => void;
+}) {
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'none'>(() => geometryService.getModo());
   const [selectedId, setSelectedId] = useState<string | 'robot_base' | null>(() => geometryService.getSeleccionado());
 
@@ -1019,6 +1635,21 @@ function GizmoQuickToolbar() {
         <RotateCw className="w-3.5 h-3.5" />
         <span>Rotar</span>
       </button>
+
+      {onToggleMeasure && (
+        <button
+          onClick={onToggleMeasure}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all ${
+            measuringActive
+              ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-400/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+              : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+          }`}
+          title="Medir distancia entre dos puntos (M)"
+        >
+          <Ruler className="w-3.5 h-3.5" />
+          <span>Medir</span>
+        </button>
+      )}
 
       {selectedId && (
         <>
@@ -1076,6 +1707,197 @@ export function RobotViewer3D({
   const [customPositions, setCustomPositions] = useState<number[][]>([]);
   const [customTcpOffset, setCustomTcpOffset] = useState<[number, number, number]>([0, 0, 0]);
   const activeTcpOffset = externalTcpOffset ?? customTcpOffset;
+  const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'none'>(() => geometryService.getModo());
+
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    targetId: string | 'robot_base';
+    clickPoint?: [number, number, number];
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    targetId: 'robot_base',
+  });
+
+  const [measureState, setMeasureState] = useState<{
+    active: boolean;
+    pointA: [number, number, number] | null;
+    pointB: [number, number, number] | null;
+    labelA?: string;
+    labelB?: string;
+  }>({
+    active: false,
+    pointA: null,
+    pointB: null,
+  });
+
+  const [snapPreview, setSnapPreview] = useState<{ point: THREE.Vector3; label: string } | null>(null);
+
+  useEffect(() => {
+    return geometryService.suscribirModo(setTransformMode);
+  }, []);
+
+  useEffect(() => {
+    const handleGlobalUndo = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          geometryService.rehacer();
+        } else {
+          geometryService.deshacer();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        geometryService.rehacer();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalUndo);
+    return () => window.removeEventListener('keydown', handleGlobalUndo);
+  }, []);
+
+  useEffect(() => {
+    const onWindowClick = () => {
+      if (contextMenu.visible) {
+        setContextMenu(prev => ({ ...prev, visible: false }));
+      }
+    };
+    window.addEventListener('click', onWindowClick);
+    return () => window.removeEventListener('click', onWindowClick);
+  }, [contextMenu.visible]);
+
+  const handleContextMenu = (e: any, targetId: string | 'robot_base') => {
+    geometryService.seleccionar(targetId);
+    const clientX = e.nativeEvent ? e.nativeEvent.clientX : e.clientX || 200;
+    const clientY = e.nativeEvent ? e.nativeEvent.clientY : e.clientY || 200;
+
+    let contactPoint: [number, number, number] | undefined;
+    if (e.point) {
+      contactPoint = [
+        Math.round((e.point.x - 0.070) * 1000),
+        Math.round(-e.point.z * 1000),
+        Math.round(e.point.y * 1000),
+      ];
+    }
+
+    setContextMenu({
+      visible: true,
+      x: Math.min(clientX, window.innerWidth - 270),
+      y: Math.min(clientY, window.innerHeight - 340),
+      targetId,
+      clickPoint: contactPoint,
+    });
+  };
+
+  const handleSnapHover = (point: THREE.Vector3, object?: THREE.Object3D | null, name?: string) => {
+    const isMoving = transformMode === 'translate' && !!geometryService.getSeleccionado();
+    if (!measureState.active && !isMoving) {
+      if (snapPreview) setSnapPreview(null);
+      return;
+    }
+    const snapped = computeSnapPoint(point, object, name);
+    setSnapPreview(snapped);
+  };
+
+  const handleSurfaceClick = (point: THREE.Vector3, name: string, object?: THREE.Object3D) => {
+    const curSel = geometryService.getSeleccionado();
+    if (!curSel || transformMode !== 'translate') return;
+
+    const snapped = computeSnapPoint(point, object, name);
+    const p = snapped.point;
+
+    const posX = Math.round((p.x - 0.070) * 1000);
+    const posY = Math.round(-p.z * 1000);
+    const posZ = Math.round(p.y * 1000);
+
+    if (curSel === 'robot_base') {
+      const curBase = geometryService.obtenerBase();
+      geometryService.registrarAccion({
+        id: 'robot_base',
+        baseAnterior: { ...curBase },
+        baseNueva: { ...curBase, x: posX, y: posY, z: posZ },
+      });
+      geometryService.actualizarBase({ x: posX, y: posY, z: posZ });
+    } else {
+      const all = geometryService.obtenerTodas();
+      const it = all.find((g) => g.id === curSel);
+      if (it) {
+        geometryService.registrarAccion({
+          id: it.id,
+          posicionAnterior: [...it.posicion],
+          rotacionAnterior: [...it.rotacion],
+          posicionNueva: [posX, posY, posZ],
+          rotacionNueva: [...it.rotacion],
+        });
+        geometryService.actualizar(it.id, { posicion: [posX, posY, posZ] });
+      }
+    }
+  };
+
+  const handlePointClick = (point: THREE.Vector3, name: string, object?: THREE.Object3D) => {
+    const snapped = computeSnapPoint(point, object, name);
+    const p = snapped.point;
+    const snapLabel = `${name} (${snapped.label})`;
+
+    const coords: [number, number, number] = [
+      Math.round((p.x - 0.070) * 1000),
+      Math.round(-p.z * 1000),
+      Math.round(p.y * 1000),
+    ];
+
+    setMeasureState((prev) => {
+      if (!prev.pointA || prev.pointB) {
+        return {
+          active: true,
+          pointA: coords,
+          pointB: null,
+          labelA: snapLabel,
+        };
+      }
+      return {
+        ...prev,
+        pointB: coords,
+        labelB: snapLabel,
+      };
+    });
+  };
+
+  const handleStartMeasureFromContext = () => {
+    if (!contextMenu.targetId) return;
+    let startPoint: [number, number, number];
+    let label = 'Punto';
+
+    if (contextMenu.clickPoint) {
+      startPoint = contextMenu.clickPoint;
+    } else if (contextMenu.targetId === 'robot_base') {
+      const base = geometryService.obtenerBase();
+      startPoint = [base.x, base.y, base.z];
+      label = 'Base Robot';
+    } else {
+      const item = geometryService.obtenerTodas().find(g => g.id === contextMenu.targetId);
+      if (item) {
+        startPoint = [...item.posicion];
+        label = item.nombre;
+      } else {
+        startPoint = [0, 0, 0];
+      }
+    }
+
+    setMeasureState({
+      active: true,
+      pointA: startPoint,
+      pointB: null,
+      labelA: label,
+      labelB: undefined,
+    });
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
 
   useEffect(() => {
     if (robotInfo) {
@@ -1210,12 +2032,94 @@ export function RobotViewer3D({
           customPositions={customPositions}
           customTcpOffset={activeTcpOffset}
           onWorkspaceToggle={handleWorkspaceToggle}
+          onContextMenu={handleContextMenu}
+          onPointClick={handlePointClick}
+          onSnapHover={handleSnapHover}
+          onSurfaceClick={handleSurfaceClick}
+          snapPreview={snapPreview}
+          measureState={measureState}
+          measuringActive={measureState.active}
+          onToggleMeasure={() => {
+            setSnapPreview(null);
+            setMeasureState(prev => ({ ...prev, active: !prev.active, pointA: null, pointB: null }));
+          }}
+          onCloseMeasure={() => {
+            setSnapPreview(null);
+            setMeasureState({ active: false, pointA: null, pointB: null });
+          }}
         />
       </Canvas>
 
-      <GizmoQuickToolbar />
+      <GizmoQuickToolbar
+        measuringActive={measureState.active}
+        onToggleMeasure={() => {
+          setSnapPreview(null);
+          setMeasureState(prev => ({ ...prev, active: !prev.active, pointA: null, pointB: null }));
+        }}
+      />
       <CollisionOverlay />
-      <CellDistanceHUD />
+
+      {transformMode === 'translate' && geometryService.getSeleccionado() && !measureState.active && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-3.5 py-1.5 rounded-xl bg-slate-950/90 backdrop-blur-xl border border-cyan-500/40 shadow-2xl text-xs text-white">
+          <Move className="w-4 h-4 text-cyan-400 animate-pulse shrink-0" />
+          <span className="font-mono text-[11px]">
+            Arrastra las flechas o <span className="text-cyan-300 font-semibold">haz clic en una superficie</span> para colocar la pieza
+          </span>
+          <button
+            onClick={() => geometryService.setModo('none')}
+            className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white"
+            title="Finalizar mover (Esc)"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {measureState.active && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-3.5 py-1.5 rounded-xl bg-slate-950/90 backdrop-blur-xl border border-sky-500/40 shadow-2xl text-xs text-white">
+          <Ruler className="w-4 h-4 text-sky-400 animate-pulse shrink-0" />
+          <span className="font-mono text-[11px]">
+            {!measureState.pointA
+              ? 'Haz clic en el Punto 1 (auto-snap a esquinas, centros y tercios)'
+              : !measureState.pointB
+              ? `Punto A [${measureState.pointA.join(', ')}] mm. Clic en Punto B`
+              : `Distancia: ${Math.round(Math.hypot(measureState.pointB[0] - measureState.pointA[0], measureState.pointB[1] - measureState.pointA[1], measureState.pointB[2] - measureState.pointA[2]))} mm (XY: ${Math.round(Math.hypot(measureState.pointB[0] - measureState.pointA[0], measureState.pointB[1] - measureState.pointA[1]))} mm)`}
+          </span>
+          {measureState.pointA && (
+            <button
+              onClick={() => {
+                setSnapPreview(null);
+                setMeasureState({ active: true, pointA: null, pointB: null });
+              }}
+              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white text-[10px]"
+            >
+              Reiniciar
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setSnapPreview(null);
+              setMeasureState({ active: false, pointA: null, pointB: null });
+            }}
+            className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white"
+            title="Cerrar (Esc)"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      <PieceContextMenu
+        state={contextMenu}
+        onClose={() => setContextMenu(prev => ({ ...prev, visible: false }))}
+        onSetModo={(modo) => geometryService.setModo(modo)}
+        transformMode={transformMode}
+        onStartMeasure={handleStartMeasureFromContext}
+        onEliminar={(id) => {
+          geometryService.eliminar(id);
+          setContextMenu(prev => ({ ...prev, visible: false }));
+        }}
+      />
 
       {(showTrajectory || showWorkspace || showPivots || isLoadingWorkspace) && (
         <div className="absolute top-16 left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/55 border border-white/10 backdrop-blur-md text-[10px]">
@@ -1290,6 +2194,14 @@ export function RobotViewer3D({
                   <kbd className="text-white font-mono">E</kbd>
                   <span className="text-gray-400">Espacio trabajo</span>
                 </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">M</kbd>
+                  <span className="text-gray-400">Medir distancia</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">Clic Der.</kbd>
+                  <span className="text-gray-400">Propiedades</span>
+                </div>
                 <div className="font-semibold text-sky-400 uppercase tracking-wider border-b border-white/10 pb-1 mt-2 mb-1">
                   Mover Pieza
                 </div>
@@ -1308,6 +2220,10 @@ export function RobotViewer3D({
                 <div className="flex justify-between">
                   <kbd className="text-white font-mono">Shift / Alt</kbd>
                   <span className="text-gray-400">Rápido / Fino</span>
+                </div>
+                <div className="flex justify-between">
+                  <kbd className="text-white font-mono">Ctrl + Z</kbd>
+                  <span className="text-gray-400">Deshacer</span>
                 </div>
                 <div className="flex justify-between">
                   <kbd className="text-white font-mono">Esc</kbd>

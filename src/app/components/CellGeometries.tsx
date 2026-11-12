@@ -12,6 +12,11 @@ import websocketService from '../../services/websocketService';
 interface CellGeometriesProps {
   geomRefs: React.MutableRefObject<Map<string, THREE.Group>>;
   colisiones: ColisionActiva[];
+  onContextMenu?: (e: any, id: string) => void;
+  onPointClick?: (point: THREE.Vector3, name: string, object?: THREE.Object3D) => void;
+  onSnapHover?: (point: THREE.Vector3, object: THREE.Object3D, name: string) => void;
+  onSurfaceClick?: (point: THREE.Vector3, name: string, object?: THREE.Object3D) => void;
+  measuringActive?: boolean;
 }
 
 const CAD_CACHE = new Map<string, THREE.BufferGeometry>();
@@ -63,10 +68,13 @@ function CadMesh({ item, isColliding }: { item: GeometryItem; isColliding: boole
     );
   }
 
+  const hasColors = Boolean((geo as any)?.hasColors || geo?.getAttribute('color'));
+
   return (
     <mesh geometry={geo} castShadow receiveShadow>
       <meshStandardMaterial
-        color={isColliding ? '#ef4444' : item.color}
+        vertexColors={hasColors && !isColliding}
+        color={isColliding ? '#ef4444' : (hasColors ? '#ffffff' : item.color)}
         emissive={isColliding ? '#b91c1c' : '#000000'}
         emissiveIntensity={isColliding ? 0.7 : 0}
         metalness={0.4}
@@ -137,6 +145,11 @@ function TableMesh({ item, isColliding }: { item: GeometryItem; isColliding: boo
 export const CellGeometries: React.FC<CellGeometriesProps> = ({
   geomRefs,
   colisiones,
+  onContextMenu,
+  onPointClick,
+  onSnapHover,
+  onSurfaceClick,
+  measuringActive,
 }) => {
   const [geometries, setGeometries] = useState<GeometryItem[]>(() =>
     geometryService.obtenerTodas()
@@ -201,7 +214,32 @@ export const CellGeometries: React.FC<CellGeometriesProps> = ({
               rotation={[rx, ry, rz]}
               onClick={(e) => {
                 e.stopPropagation();
+                if (geometryService.recienArrastrado()) return;
+                if (measuringActive && onPointClick) {
+                  onPointClick(e.point, item.nombre, e.object);
+                  return;
+                }
+                const currentModo = geometryService.getModo();
+                const currentSel = geometryService.getSeleccionado();
+                if (currentModo === 'translate' && currentSel && currentSel !== item.id && onSurfaceClick) {
+                  onSurfaceClick(e.point, item.nombre, e.object);
+                  return;
+                }
                 geometryService.seleccionar(item.id);
+              }}
+              onPointerMove={(e) => {
+                const currentModo = geometryService.getModo();
+                const currentSel = geometryService.getSeleccionado();
+                const isMoving = currentModo === 'translate' && currentSel && currentSel !== item.id;
+                if ((measuringActive || isMoving) && onSnapHover) {
+                  e.stopPropagation();
+                  onSnapHover(e.point, e.object, item.nombre);
+                }
+              }}
+              onContextMenu={(e) => {
+                e.stopPropagation();
+                if (e.nativeEvent) e.nativeEvent.preventDefault();
+                if (onContextMenu) onContextMenu(e, item.id);
               }}
             >
               {item.tipo === 'table' && <TableMesh item={item} isColliding={isColliding} />}
@@ -268,8 +306,10 @@ export const CellGeometries: React.FC<CellGeometriesProps> = ({
 
       {showVisionPieces &&
         visionPieces.map((p) => {
+          const mesaItem = geometries.find((g) => g.id === 'geom_mesa_trabajo' || g.tipo === 'table');
+          const alturaMesa = mesaItem ? (mesaItem.posicion[2] + mesaItem.dimensiones[2]) / 1000 : 0.772;
           const px = 0.070 + p.posicion_mm[0] / 1000;
-          const py = 0.65 + 0.015; // Sobre la mesa de altura 650 mm
+          const py = alturaMesa;
           const pz = -p.posicion_mm[1] / 1000;
 
           return (
