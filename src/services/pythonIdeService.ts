@@ -25,6 +25,9 @@ export interface ConnectionStatus {
   latency_ms: number | null;
   last_seen: number | null;
   mock_server_running: boolean;
+  physical_armed?: boolean;
+  is_lan?: boolean;
+  busy?: boolean;
 }
 
 export interface TrafficEntry {
@@ -130,9 +133,16 @@ class PythonIdeService {
     host: string,
     port: number,
     timeout: number,
-    mode: 'SIMULATED' | 'CONNECTED_PHYSICAL' | 'DEVELOPMENT'
+    mode: 'SIMULATED' | 'CONNECTED_PHYSICAL' | 'DEVELOPMENT',
+    auto_arm?: boolean
   ): Promise<any> {
-    const res = await api.post('/api/connection/connect', { host, port, timeout, mode });
+    const res = await api.post('/api/connection/connect', {
+      host,
+      port,
+      timeout,
+      mode,
+      ...(auto_arm !== undefined ? { auto_arm } : {}),
+    });
     return res.data;
   }
 

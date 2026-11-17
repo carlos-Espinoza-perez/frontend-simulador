@@ -37,6 +37,12 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('virtual_local');
   const [connError, setConnError] = useState<string | null>(null);
+  const [autoArmOnLan, setAutoArmOnLan] = useState<boolean>(true);
+
+  const isLanIp = (h: string) => {
+    const clean = (h || '').trim().toLowerCase();
+    return Boolean(clean) && !['127.0.0.1', 'localhost', '::1', '0.0.0.0'].includes(clean);
+  };
 
   const fetchProfiles = async () => {
     try {
@@ -120,7 +126,17 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
     setLoading(true);
     setConnError(null);
     try {
-      const res = await pythonIdeService.connectRobot(host, port, timeout, mode);
+      const effectiveMode = isLanIp(host) ? 'CONNECTED_PHYSICAL' : mode;
+      if (effectiveMode !== mode) {
+        setMode(effectiveMode);
+      }
+      const res = await pythonIdeService.connectRobot(
+        host,
+        port,
+        timeout,
+        effectiveMode,
+        effectiveMode === 'CONNECTED_PHYSICAL' ? autoArmOnLan : false
+      );
       if (!res?.success) {
         setConnError(res?.error || 'No se pudo establecer conexión con el controlador.');
       }
@@ -299,7 +315,13 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
                 type="text"
                 value={host}
                 disabled={isConnected}
-                onChange={(e) => setHost(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setHost(val);
+                  if (isLanIp(val)) {
+                    setMode('CONNECTED_PHYSICAL');
+                  }
+                }}
                 className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded text-white focus:outline-none focus:border-cyan-400"
               />
             </div>
@@ -341,6 +363,19 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
               </select>
             </div>
           </div>
+
+          {(mode === 'CONNECTED_PHYSICAL' || isLanIp(host)) && (
+            <label className="flex items-center gap-1.5 px-2 py-1.5 bg-amber-500/10 border border-amber-500/25 rounded text-[10px] text-amber-200 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={autoArmOnLan}
+                disabled={isConnected}
+                onChange={(e) => setAutoArmOnLan(e.target.checked)}
+                className="rounded border-amber-500/40 accent-amber-400"
+              />
+              <span>Armar canal físico automáticamente al conectar por LAN</span>
+            </label>
+          )}
 
           <div className="flex gap-2 pt-1">
             {isConnected ? (
@@ -402,7 +437,7 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
             </span>
           </div>
           <p className="text-[10px] text-gray-500 leading-tight">
-            Emula las respuestas de RobotWare 6 para pruebas sin necesidad de un controlador físico o RobotStudio.
+            Emula las respuestas de RobotWare 5/6 para pruebas sin necesidad de un controlador físico o RobotStudio.
           </p>
           <button
             onClick={handleToggleMockServer}

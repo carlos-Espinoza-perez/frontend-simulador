@@ -469,8 +469,8 @@ function WorkspaceCloud({ points, initPos, initRot, isIRB140, basePose }: { poin
   );
 }
 
-const DEFAULT_CAMERA_POS: [number, number, number] = [1.3, 1.0, 1.3];
-const DEFAULT_ORBIT_TARGET: [number, number, number] = [DX, 0.42, DY];
+const DEFAULT_CAMERA_POS: [number, number, number] = [2.35, 1.85, 2.35];
+const DEFAULT_ORBIT_TARGET: [number, number, number] = [DX, 0.85, DY];
 
 function CameraResetEffect({
   resetCameraTrigger,
