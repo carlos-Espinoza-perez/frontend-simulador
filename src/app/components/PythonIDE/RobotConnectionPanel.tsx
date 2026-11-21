@@ -17,7 +17,8 @@ import {
 import pythonIdeService, {
   ConnectionStatus,
   TrafficEntry,
-  ConnectionProfile
+  ConnectionProfile,
+  VirtualSignal
 } from '../../../services/pythonIdeService';
 
 interface RobotConnectionPanelProps {
@@ -38,6 +39,7 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
   const [selectedProfileId, setSelectedProfileId] = useState<string>('virtual_local');
   const [connError, setConnError] = useState<string | null>(null);
   const [autoArmOnLan, setAutoArmOnLan] = useState<boolean>(true);
+  const [registeredSignals, setRegisteredSignals] = useState<VirtualSignal[]>([]);
 
   const isLanIp = (h: string) => {
     const clean = (h || '').trim().toLowerCase();
@@ -110,9 +112,19 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
     }
   };
 
+  const fetchRegisteredSignals = async () => {
+    try {
+      const list = await pythonIdeService.listVirtualSignals();
+      setRegisteredSignals(list);
+    } catch {
+      // Ignorar si aun no responde
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchProfiles();
+    fetchRegisteredSignals();
     const interval = setInterval(() => {
       fetchStatus();
       if (showTraffic) {
@@ -121,6 +133,23 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
     }, 2000);
     return () => clearInterval(interval);
   }, [showTraffic]);
+
+  useEffect(() => {
+    if (testCmd === 'GET_DI' || testCmd === 'GET_DO' || testCmd === 'SET_DO') {
+      fetchRegisteredSignals();
+    }
+  }, [testCmd]);
+
+  const handleDiagnostics = async () => {
+    try {
+      const res = await pythonIdeService.getConnectionDiagnostics();
+      setCmdResult(res);
+      await fetchStatus();
+      await fetchTraffic();
+    } catch (err: any) {
+      setCmdResult({ success: false, error: err.response?.data?.error || err.message || String(err) });
+    }
+  };
 
   const handleConnect = async () => {
     setLoading(true);
@@ -498,7 +527,23 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
           <div className="grid grid-cols-2 gap-1.5">
             <select
               value={testCmd}
-              onChange={(e) => setTestCmd(e.target.value as any)}
+              onChange={(e) => {
+                const nextCmd = e.target.value as any;
+                setTestCmd(nextCmd);
+                if (nextCmd === 'GET_DI') {
+                  const firstDi = registeredSignals.find((s) => s.type === 'DI');
+                  if (firstDi && !registeredSignals.some((s) => s.type === 'DI' && s.name === signalName)) {
+                    setSignalName(firstDi.name);
+                  }
+                } else if (nextCmd === 'GET_DO' || nextCmd === 'SET_DO') {
+                  const firstDo = registeredSignals.find((s) => s.type === 'DO');
+                  if (firstDo && !registeredSignals.some((s) => s.type === 'DO' && s.name === signalName)) {
+                    setSignalName(firstDo.name);
+                  }
+                } else if (nextCmd === 'GET_VARIABLE' && (signalName.startsWith('di_') || signalName.startsWith('do_'))) {
+                  setSignalName('speed_override');
+                }
+              }}
               className="px-2 py-1 bg-black/40 border border-white/10 rounded text-white text-[11px]"
             >
               <option value="PING">PING</option>
@@ -523,13 +568,28 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
                 <option value="TEST_SAFE_1">TEST_SAFE_1 (Despegue)</option>
               </select>
             ) : testCmd === 'GET_DI' || testCmd === 'GET_DO' || testCmd === 'SET_DO' || testCmd === 'GET_VARIABLE' ? (
-              <input
-                type="text"
-                value={signalName}
-                onChange={(e) => setSignalName(e.target.value)}
-                placeholder="Nombre señal"
-                className="px-2 py-1 bg-black/40 border border-white/10 rounded text-white text-[11px]"
-              />
+              <>
+                <input
+                  type="text"
+                  list={testCmd === 'GET_VARIABLE' ? 'registered-vars' : 'registered-io-signals'}
+                  value={signalName}
+                  onChange={(e) => setSignalName(e.target.value)}
+                  placeholder="Nombre señal"
+                  className="px-2 py-1 bg-black/40 border border-white/10 rounded text-white text-[11px]"
+                />
+                <datalist id="registered-io-signals">
+                  {registeredSignals
+                    .filter((s) => (testCmd === 'GET_DI' ? s.type === 'DI' : s.type === 'DO'))
+                    .map((s) => (
+                      <option key={s.name} value={s.name} />
+                    ))}
+                </datalist>
+                <datalist id="registered-vars">
+                  <option value="speed_override" />
+                  <option value="cycle_counter" />
+                  <option value="current_speed" />
+                </datalist>
+              </>
             ) : (
               <div className="px-2 py-1 bg-black/20 rounded text-[10px] text-gray-500 flex items-center">
                 Comando directo
@@ -619,18 +679,29 @@ export const RobotConnectionPanel: React.FC<RobotConnectionPanelProps> = ({ onSt
             </label>
           )}
 
-          <button
-            onClick={handleSendCommand}
-            disabled={!isConnected}
-            className={`w-full py-1.5 rounded font-semibold text-[11px] flex items-center justify-center gap-1.5 transition-all ${
-              isConnected
-                ? 'bg-emerald-500 text-black hover:bg-emerald-400'
-                : 'bg-white/5 text-gray-600 cursor-not-allowed'
-            }`}
-          >
-            <Send className="w-3 h-3" />
-            <span>Enviar Comando ({testCmd})</span>
-          </button>
+          <div className="flex gap-1.5">
+            <button
+              onClick={handleSendCommand}
+              disabled={!isConnected}
+              className={`flex-1 py-1.5 rounded font-semibold text-[11px] flex items-center justify-center gap-1.5 transition-all ${
+                isConnected
+                  ? 'bg-emerald-500 text-black hover:bg-emerald-400'
+                  : 'bg-white/5 text-gray-600 cursor-not-allowed'
+              }`}
+            >
+              <Send className="w-3 h-3" />
+              <span>Enviar Comando ({testCmd})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDiagnostics}
+              title="Consultar /api/connection/diagnostics (enlace, PING, estado, DI/DO y tráfico)"
+              className="px-2.5 py-1.5 rounded font-semibold text-[11px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/25 transition-all"
+            >
+              Diagnóstico
+            </button>
+          </div>
 
           {cmdResult && (
             <div className="p-2 bg-black/50 rounded border border-white/10 text-[10px] space-y-1">

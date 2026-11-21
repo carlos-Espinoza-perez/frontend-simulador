@@ -43,6 +43,9 @@ export interface VirtualSignal {
   value: number;
   description: string;
   is_virtual: boolean;
+  synced?: boolean;
+  controller_value?: number | null;
+  controller_error?: string | null;
 }
 
 export interface ConnectionProfile {
@@ -193,10 +196,20 @@ class PythonIdeService {
     return res.data.logs || [];
   }
 
+  async getConnectionDiagnostics(): Promise<any> {
+    const res = await api.get('/api/connection/diagnostics');
+    return res.data;
+  }
+
   async listVirtualSignals(type?: 'DI' | 'DO'): Promise<VirtualSignal[]> {
     const params = type ? `?type=${type}` : '';
     const res = await api.get(`/api/virtual_io/signals${params}`);
     return res.data.signals || [];
+  }
+
+  async syncVirtualSignals(): Promise<any> {
+    const res = await api.post('/api/virtual_io/sync');
+    return res.data;
   }
 
   async createVirtualSignal(
@@ -214,8 +227,26 @@ class PythonIdeService {
     return res.data.signal;
   }
 
-  async updateVirtualSignal(name: string, value: number): Promise<VirtualSignal> {
-    const res = await api.post('/api/virtual_io/signal/update', { name, value });
+  async updateVirtualSignal(
+    name: string,
+    value: number,
+    physical_confirmed = false,
+    sync_controller = true
+  ): Promise<any> {
+    const res = await api.post('/api/virtual_io/signal/update', {
+      name,
+      value,
+      physical_confirmed,
+      sync_controller,
+    });
+    return res.data;
+  }
+
+  async editVirtualSignal(
+    name: string,
+    payload: { new_name?: string; description?: string; value?: number }
+  ): Promise<VirtualSignal> {
+    const res = await api.post('/api/virtual_io/signal/edit', { name, ...payload });
     return res.data.signal;
   }
 
@@ -228,8 +259,8 @@ class PythonIdeService {
     return res.data.signals || [];
   }
 
-  async exportEioCfg(): Promise<{ content: string; filename: string }> {
-    const res = await api.get('/api/virtual_io/export/eio_cfg');
+  async exportEioCfg(rwVersion: 5 | 6 = 5, includeMotorOn = true): Promise<{ content: string; filename: string; rw_version?: number }> {
+    const res = await api.get(`/api/virtual_io/export/eio_cfg?rw=${rwVersion}&include_motor_on=${includeMotorOn}`);
     return res.data;
   }
 
